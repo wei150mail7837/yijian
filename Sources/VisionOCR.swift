@@ -39,7 +39,7 @@ enum VisionOCR {
                     guard let top = obs.topCandidates(1).first else { return nil }
                     return Line(text: top.string, y: 1 - obs.boundingBox.origin.y)
                 }
-                let text = lines.sorted { $0.y > $1.y }.map(\.text).joined(separator: "\n")
+                let text = lines.sorted { $0.y < $1.y }.map(\.text).joined(separator: "\n")
                 DispatchQueue.main.async { completion(.success(text)) }
             } catch {
                 DispatchQueue.main.async { completion(.failure(error)) }
