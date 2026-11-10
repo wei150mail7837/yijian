@@ -41,11 +41,8 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
         side.material = .sidebar
         content.addSubview(side)
         for (i, t) in menuTitles.enumerated() {
-            let b = NSButton(title: t, target: self, action: #selector(menuClicked(_:)))
+            let b = SidebarButton(title: t)
             b.tag = i
-            b.isBordered = false
-            b.alignment = .left
-            b.setButtonType(.pushOnPushOff)
             b.frame = NSRect(x: 16, y: 540 - i * 36, width: 150, height: 28)
             side.addSubview(b)
             menuButtons.append(b)
@@ -391,5 +388,52 @@ final class ShortcutRecorder: NSButton {
         guard let name = Self.codeToName[code] else { NSSound.beep(); return }
         let mods = Self.modString(flags)
         end(commit: mods.isEmpty ? name : mods + "+" + name)
+    }
+}
+
+/// 侧栏菜单按钮：悬停淡高亮、选中强调色底+白字，状态变化即时可视
+final class SidebarButton: NSButton {
+    private var hover = false
+
+    init(title text: String) {
+        super.init(frame: .zero)
+        title = text
+        alignment = .left
+        setButtonType(.pushOnPushOff)
+        isBordered = false
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        imageHugsTitle = true
+        contentTintColor = .labelColor
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var state: NSControl.StateValue {
+        didSet { updateVisual() }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if trackingAreas.contains(where: { $0.options.contains(.mouseEnteredAndExited) }) { return }
+        addTrackingArea(NSTrackingArea(rect: bounds.insetBy(dx: -2, dy: 0),
+                                       options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { hover = true; updateVisual() }
+    override func mouseExited(with event: NSEvent) { hover = false; updateVisual() }
+
+    private func updateVisual() {
+        let selected = state == .on
+        if selected {
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.85).cgColor
+            contentTintColor = .white
+        } else if hover {
+            layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+            contentTintColor = .labelColor
+        } else {
+            layer?.backgroundColor = NSColor.clear.cgColor
+            contentTintColor = .labelColor
+        }
     }
 }
