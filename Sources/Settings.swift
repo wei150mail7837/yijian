@@ -8,7 +8,7 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
     static var pendingPageIndex: Int?
 
     private let menuTitles = ["偏好设置", "高级设置", "全局快捷键设置", "翻译源设置"]
-    private var menuButtons: [NSButton] = []
+    private var menuItems: [SidebarItem] = []
     private let tabs = NSTabView()
     private let statusLabel = NSTextField(labelWithString: "")
     private var checks: [(NSButton, (Bool) -> Void, () -> Bool)] = []
@@ -41,11 +41,12 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
         side.material = .sidebar
         content.addSubview(side)
         for (i, t) in menuTitles.enumerated() {
-            let b = SidebarButton(title: t)
-            b.tag = i
-            b.frame = NSRect(x: 16, y: 540 - i * 36, width: 150, height: 28)
-            side.addSubview(b)
-            menuButtons.append(b)
+            let item = SidebarItem(title: t, tag: i) { [weak self] idx in
+                DispatchQueue.main.async { self?.select(idx) }
+            }
+            item.frame = NSRect(x: 16, y: 540 - i * 36, width: 150, height: 28)
+            side.addSubview(item)
+            menuItems.append(item)
         }
         tabs.tabViewType = .noTabsNoBorder
         tabs.frame = NSRect(x: 190, y: 40, width: 640, height: 530)
@@ -214,7 +215,7 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
 
     private func select(_ i: Int) {
         tabs.selectTabViewItem(at: i)
-        for b in menuButtons { b.state = b.tag == i ? .on : .off }
+        for item in menuItems { item.selected = (item.tag == i) }
         statusLabel.stringValue = ""
     }
 
@@ -227,11 +228,6 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
     }
 
     // MARK: - 事件
-
-    @objc private func menuClicked(_ b: NSButton) {
-        select(b.tag)
-        b.state = .on   // pushOnPushOff 会自行翻转，强制保持选中态
-    }
 
     @objc private func checkChanged(_ b: NSButton) {
         guard let entry = checks.first(where: { $0.0 === b }) else { return }
@@ -405,49 +401,49 @@ final class ShortcutRecorder: NSButton {
     }
 }
 
-/// 侧栏菜单按钮：悬停淡高亮、选中强调色底+白字，状态变化即时可视
-final class SidebarButton: NSButton {
-    private var hover = false
 
-    init(title text: String) {
+/// 侧栏菜单项：自绘视图（无 NSButton 状态机）。悬停淡底、选中强调色底白字。
+final class SidebarItem: NSView {
+    let itemTag: Int
+    var selected = false { didSet { needsDisplay = true } }
+    private var hover = false { didSet { needsDisplay = true } }
+    private let label: NSTextField
+    private var onSelect: (Int) -> Void
+
+    init(title: String, tag: Int, onSelect: @escaping (Int) -> Void) {
+        self.itemTag = tag
+        self.onSelect = onSelect
+        label = NSTextField(labelWithString: title)
         super.init(frame: .zero)
-        title = text
-        alignment = .left
-        setButtonType(.pushOnPushOff)
-        isBordered = false
         wantsLayer = true
         layer?.cornerRadius = 6
-        imageHugsTitle = true
-        contentTintColor = .labelColor
+        label.frame = NSRect(x: 12, y: 5, width: 130, height: 18)
+        addSubview(label)
     }
     required init?(coder: NSCoder) { fatalError() }
-
-    override var state: NSControl.StateValue {
-        didSet { updateVisual() }
-    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if trackingAreas.contains(where: { $0.options.contains(.mouseEnteredAndExited) }) { return }
-        addTrackingArea(NSTrackingArea(rect: bounds.insetBy(dx: -2, dy: 0),
-                                       options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
                                        owner: self, userInfo: nil))
     }
 
-    override func mouseEntered(with event: NSEvent) { hover = true; updateVisual() }
-    override func mouseExited(with event: NSEvent) { hover = false; updateVisual() }
+    override func mouseEntered(with event: NSEvent) { hover = true }
+    override func mouseExited(with event: NSEvent) { hover = false }
+    override func mouseDown(with event: NSEvent) { onSelect(itemTag) }
 
-    private func updateVisual() {
-        let selected = state == .on
+    override func draw(_ dirtyRect: NSRect) {
         if selected {
-            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.85).cgColor
-            contentTintColor = .white
-        } else if hover {
-            layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
-            contentTintColor = .labelColor
+            NSColor.controlAccentColor.setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
+            label.textColor = .white
         } else {
-            layer?.backgroundColor = NSColor.clear.cgColor
-            contentTintColor = .labelColor
+            if hover {
+                NSColor.quaternaryLabelColor.setFill()
+                NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
+            }
+            label.textColor = .labelColor
         }
     }
 }
