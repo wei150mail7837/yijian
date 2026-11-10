@@ -228,7 +228,10 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
 
     // MARK: - 事件
 
-    @objc private func menuClicked(_ b: NSButton) { select(b.tag) }
+    @objc private func menuClicked(_ b: NSButton) {
+        select(b.tag)
+        b.state = .on   // pushOnPushOff 会自行翻转，强制保持选中态
+    }
 
     @objc private func checkChanged(_ b: NSButton) {
         guard let entry = checks.first(where: { $0.0 === b }) else { return }
@@ -345,17 +348,28 @@ final class ShortcutRecorder: NSButton {
     }
 
     @objc private func begin() {
-        guard !recording else { return }
+        if recording { end(commit: nil); return }
         Shortcuts.shared.unregisterAll()
         liveMods = ""
         recording = true
         window?.makeFirstResponder(self)
+        // 保险：点窗口其他任何地方都结束录入并恢复热键
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] e in
+            guard let self, self.recording, let w = self.window else { return e }
+            let loc = e.locationInWindow
+            let inRecorder = w.contentView?.hitTest(loc) === self
+            if !inRecorder { self.end(commit: nil) }
+            return e
+        }
     }
+    private var clickMonitor: Any?
 
     private func end(commit raw: String?) {
         guard recording else { return }
         recording = false
-        (NSApp.delegate as? AppDelegate)?.registerAllShortcuts()
+        if let m = clickMonitor { NSEvent.removeMonitor(m); clickMonitor = nil }
+        let errors = (NSApp.delegate as? AppDelegate)?.registerAllShortcuts() ?? []
+        if !errors.isEmpty { log("快捷键恢复失败：\(errors.joined(separator: "；"))") }
         if let raw { onCommit?(slot, raw) }
     }
 
