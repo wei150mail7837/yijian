@@ -45,12 +45,14 @@ enum ScreenshotService {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         task.arguments = ["-i", file.path]
+        log("[截图] screencapture -i 启动，等待框选…")
         task.terminationHandler = { t in
             let ok = t.terminationStatus == 0 && FileManager.default.fileExists(atPath: file.path)
+            log("[截图] screencapture 结束 status=\(t.terminationStatus) 文件存在=\(FileManager.default.fileExists(atPath: file.path))")
             if !ok { try? FileManager.default.removeItem(at: file) }
             DispatchQueue.main.async { completion(ok ? file : nil) }
         }
-        do { try task.run() } catch { DispatchQueue.main.async { completion(nil) } }
+        do { try task.run() } catch { log("[截图] screencapture 启动失败：\(error.localizedDescription)"); DispatchQueue.main.async { completion(nil) } }
     }
 }
 

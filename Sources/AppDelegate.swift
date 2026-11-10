@@ -73,8 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "截图翻译", action: #selector(screenshotTranslate), keyEquivalent: "")
         menu.addItem(withTitle: "截图OCR", action: #selector(screenshotOCR), keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "使用教程", action: #selector(openTutorial), keyEquivalent: "")
-        menu.addItem(withTitle: "下载维护版本", action: #selector(openReleases), keyEquivalent: "")
         menu.addItem(withTitle: "查看日志", action: #selector(openLogs), keyEquivalent: "")
         menu.addItem(withTitle: "设置", action: #selector(openSettings), keyEquivalent: "")
         menu.addItem(.separator())
@@ -161,6 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showMain() { translateInput() }
 
     @objc private func screenshotTranslate() {
+        log("[截图翻译] 托盘/快捷键触发")
         captureWithEngine { file in
             guard let file else { return }
             VisionOCR.recognize(fileURL: file) { result in
@@ -195,14 +194,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if url == nil { log("[截图] 已取消") }
             completion(url)
         }
-    }
-
-    @objc private func openTutorial() {
-        NSWorkspace.shared.open(URL(string: "https://github.com/InkTimeCoding/TTime")!)
-    }
-
-    @objc private func openReleases() {
-        NSWorkspace.shared.open(URL(string: "https://github.com/InkTimeCoding/TTime/releases")!)
     }
 
     @objc private func openLogs() {
