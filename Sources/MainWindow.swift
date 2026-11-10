@@ -383,8 +383,10 @@ final class MainWindow: NSWindow, NSWindowDelegate {
             }
             resultView.frame = NSRect(x: 6, y: ch, width: cw - 12, height: 10)
             resultView.textContainer?.containerSize = NSSize(width: cw - 16, height: .greatestFiniteMagnitude)
-            let maxBody = max(40, (screen?.visibleFrame.height ?? 800) - y - 140)
-            let rh = min(resultTextHeight, maxBody)
+            // 填充驱动：结果区 ≥ 内容高度，且填满窗口剩余空间（手动拉伸窗口时跟随）
+            let availCard = root.bounds.height - y - margin
+            let fillH = availCard - ch - 28   // 28 = 结果下方按钮行 + 卡片内边距
+            let rh = max(resultTextHeight, fillH)
             resultView.frame.size.height = rh
             lastLaidResultH = rh // layoutContent 任何路径重排后同步基线，避免打字机误判
             ch += rh + 4
