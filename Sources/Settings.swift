@@ -1,13 +1,13 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// 设置窗口：850x600、隐藏标题栏、不可调大小、单例；左侧 7 项菜单
+/// 设置窗口：850x600、隐藏标题栏、不可调大小、单例；左侧 4 项菜单
 final class SettingsWindow: NSWindow, NSWindowDelegate {
     static let shared = SettingsWindow()
     /// 对应 setPageMenuIndex：下次打开跳到该页（读后即删）
     static var pendingPageIndex: Int?
 
-    private let menuTitles = ["偏好设置", "高级设置", "全局快捷键设置", "翻译源设置", "配置文件设置", "关于"]
+    private let menuTitles = ["偏好设置", "高级设置", "全局快捷键设置", "翻译源设置"]
     private var menuButtons: [NSButton] = []
     private let tabs = NSTabView()
     private let statusLabel = NSTextField(labelWithString: "")
@@ -61,8 +61,6 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
         addPage(buildAdvanced())
         addPage(buildShortcuts())
         addPage(buildSource())
-        addPage(buildConfigFile())
-        addPage(buildAbout())
         EscMonitor.add(self)
     }
 
@@ -193,18 +191,6 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
         return v
     }
 
-    private func buildConfigFile() -> NSView {
-        let v = note("配置存储于 UserDefaults 域 com.isa.ttimenative（~/Library/Preferences/com.isa.ttimenative.plist）。原生版不支持迁移配置文件路径（与 Electron 版差异）。")
-        let b = NSButton(title: "在访达中显示", target: self, action: #selector(revealPrefs))
-        b.bezelStyle = .rounded; b.frame = NSRect(x: 0, y: 400, width: 160, height: 28)
-        v.addSubview(b); return v
-    }
-
-    private func buildAbout() -> NSView {
-        let ver = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
-        return note("TTime Native 版本 \(ver)\n纯 AppKit 原生复刻（Electron Lite 版行为对齐）。")
-    }
-
     // MARK: - 展示
 
     func showSettings() {
@@ -301,12 +287,6 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
     }
 
     @objc private func grantAX() { SelectionReader.promptAccessibility() }
-
-    @objc private func revealPrefs() {
-        let p = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Preferences/com.isa.ttimenative.plist")
-        NSWorkspace.shared.activateFileViewerSelecting([p])
-    }
 }
 
 extension Notification.Name {
