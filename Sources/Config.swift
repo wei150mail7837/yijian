@@ -14,36 +14,16 @@ enum Config {
     private static func setFlag(_ key: String, _ v: Bool) { d.set(v, forKey: key) }
 
     static var ollamaURL: String {
-        get {
-            // Web 通道桥接在此装挂：所有请求都必经本 getter，CLI 自检路径（main.swift 不实例化
-            // AppDelegate）也因此覆盖；幂等，重复调用零成本。
-            WebTranslateChannel.installIfNeeded()
-            return d.string(forKey: "ollamaURL") ?? "http://127.0.0.1:11434/v1/chat/completions"
-        }
+        get { d.string(forKey: "ollamaURL") ?? "http://127.0.0.1:11434/v1/chat/completions" }
         set { d.set(newValue, forKey: "ollamaURL") }
     }
 
-    // MARK: 翻译通道（对齐盲测 T22：除 Ollama 外提供免配置 Web 翻译通道）
+    /// 翻译通道固定为 Ollama（OpenAI 兼容接口）；Web/MyMemory 通道因翻译质量缺陷已移除
+    static let channel = "ollama"
 
-    static let channels = ["ollama", "web"]
-    static let channelNames = ["Ollama（本地 / 自建接口）", "Web 翻译（免配置，MyMemory）"]
-    /// "ollama" = 走接口地址+模型名；"web" = 内置免配置 Web 翻译（URLProtocol 桥接，见 AppDelegate.swift）
-    static var channel: String {
-        get {
-            let v = d.string(forKey: "translateChannel") ?? "ollama"
-            return channels.contains(v) ? v : "ollama"
-        }
-        set { d.set(channels.contains(newValue) ? newValue : "ollama", forKey: "translateChannel") }
-    }
-
-    /// 模型名。Web 通道（T22）不需要模型：未填写时兜底 "mymemory"，
-    /// 否则 OllamaClient.call 的空模型守卫（OllamaClient.swift:131）会把免配置 Web 通道拦死。
-    /// Ollama 通道保持原样（空 = 提示用户去设置填写）。
+    /// 模型名（空 = 提示用户去设置填写）
     static var model: String {
-        get {
-            let v = d.string(forKey: "model") ?? ""
-            return (channel == "web" && v.isEmpty) ? "mymemory" : v
-        }
+        get { d.string(forKey: "model") ?? "" }
         set { d.set(newValue, forKey: "model") }
     }
 

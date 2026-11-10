@@ -45,15 +45,5 @@ OUT=$("$BIN" --selftest-translate "Hello, world" 2>&1); RC=$?
 echo "$OUT"
 [[ $RC -eq 0 && "$OUT" == *TRANSLATE_RESULT:?* ]] || { echo "GATE_FAIL: 翻译失败或为空"; exit 6; }
 echo "GATE_OK: Ollama 通道翻译"
-
-# 通道二：Web 翻译（免配置，MyMemory）——先记原值，测完还原。
-# 故意不清空/不写 model：验证 Config.model 的 "web 通道未填模型 → mymemory" 兜底
-SAVED_CH=$(defaults read com.isa.ttimenative translateChannel 2>/dev/null || true)
-defaults write com.isa.ttimenative translateChannel -string web
-OUT=$("$BIN" --selftest-translate "Hello, world" 2>&1); RC=$?
-echo "$OUT"
-if [[ -n "$SAVED_CH" ]]; then defaults write com.isa.ttimenative translateChannel -string "$SAVED_CH"; else defaults delete com.isa.ttimenative translateChannel 2>/dev/null; fi
-[[ $RC -eq 0 && "$OUT" == *TRANSLATE_RESULT:?* ]] || { echo "GATE_FAIL: Web 通道翻译失败或为空"; exit 7; }
-echo "GATE_OK: Web 通道翻译"
 echo "GATE_OK: 全部通过"
 rm -rf "$TMP"

@@ -9,7 +9,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Web 翻译通道桥接：赶在首个 URLSession 建立前注册（Config.ollamaURL getter 兜底）
-        WebTranslateChannel.installIfNeeded()
         // 单实例：已有同 bundle 实例在跑 → 通知它 translateInput 后本实例退出
         let me = ProcessInfo.processInfo.processIdentifier
         let bid = Bundle.main.bundleIdentifier ?? "com.isa.ttimenative"
@@ -192,7 +191,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func captureWithEngine(completion: @escaping (URL?) -> Void) {
-        if !Config.systemScreenshot { log("[截图] 内置引擎未实现，回落系统截图") }
         ScreenshotService.capture { url in
             if url == nil { log("[截图] 已取消") }
             completion(url)
@@ -230,136 +228,6 @@ extension MainWindow {
     static func showErrorMessage(_ message: String) { shared.showErrorMessage(message) }
 }
 
-// MARK: - Web 翻译通道（盲测 T22：仅 Ollama 一个通道 → 增加免配置 Web 通道）
-
-/// 思路：OllamaClient 只会说 OpenAI chat 协议且不可改动（域外文件），故用 URLProtocol 在
-/// 进程内把「发往接口地址、且通道=web」的请求拦截下来，改调 MyMemory 免费翻译接口，
-/// 再把结果包成 OpenAI 非流式 chat.completion 响应回给 OllamaClient 的非流式兜底分支
-/// （OllamaClient.swift:158-173：Content-Type 非 event-stream 即一次性解析 choices[0].message.content）。
-/// 系统提示词里已含解析好的语种名（OllamaClient.translate 的 fill），据此还原 sl/tl。
-final class WebTranslateChannel: URLProtocol {
-    private static var installed = false
-
-    /// 幂等装挂：必须发生在首个 URLSession.shared 之前（Config.ollamaURL getter 调用，覆盖 GUI 与 CLI 自检）
-    static func installIfNeeded() {
-        guard !installed else { return }
-        installed = true
-        URLProtocol.registerClass(Self.self)
-    }
-
-    private static func intercepts(_ request: URLRequest) -> Bool {
-        guard Config.channel == "web", let url = request.url?.absoluteString else { return false }
-        return url == Config.ollamaURL
-    }
-
-    override class func canInit(with request: URLRequest) -> Bool { intercepts(request) }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() { Self.translate(request: request, client: client, reporter: self) }
-    override func stopLoading() {}
-
-    // MARK: 请求改写与回包
-
-    private static func translate(request: URLRequest, client: URLProtocolClient?, reporter: URLProtocol) {
-        let fail = { (msg: String) -> Void in
-            client?.urlProtocol(reporter, didFailWithError: mkErr(msg))
-        }
-        guard let body = requestBody(of: request),
-              let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              let messages = obj["messages"] as? [[String: Any]],
-              let system = messages.first?["content"] as? String,
-              let text = messages.last?["content"] as? String, !text.isEmpty else {
-            return fail("Web 通道：无法解析请求体")
-        }
-        let (sl, tl) = languages(fromPrompt: system, text: text)
-        var comps = URLComponents(string: "https://api.mymemory.translated.net/get")!
-        comps.queryItems = [
-            URLQueryItem(name: "q", value: text),
-            URLQueryItem(name: "langpair", value: "\(googleCode(sl))|\(googleCode(tl))"),
-            URLQueryItem(name: "de", value: "isa@ttimenative.local"), // MyMemory 要求的联系邮箱占位
-        ]
-        var req = URLRequest(url: comps.url!)
-        req.timeoutInterval = 20
-        // 显式清空协议表，避免桥接请求再次被自己拦截
-        let cfg = URLSessionConfiguration.ephemeral
-        cfg.protocolClasses = []
-        let session = URLSession(configuration: cfg)
-        session.dataTask(with: req) { data, resp, error in
-            defer { session.finishTasksAndInvalidate() }
-            if let error { return fail("Web 通道：\(error.localizedDescription)") }
-            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-                  let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let status = obj["responseStatus"] as? Int, status == 200,
-                  let rd = obj["responseData"] as? [String: Any],
-                  let out = rd["translatedText"] as? String, !out.isEmpty else {
-                let detail = data.map { String(String(decoding: $0, as: UTF8.self).prefix(200)) } ?? "无数据"
-                return fail("Web 通道：服务异常 \(detail)")
-            }
-            // MyMemory 偶尔把无法翻译的原文原样回传并附警告，仍照常交付
-            let payload: [String: Any] = [
-                "id": "web-\(Int(Date().timeIntervalSince1970))",
-                "object": "chat.completion",
-                "model": "mymemory",
-                "choices": [["index": 0,
-                             "message": ["role": "assistant", "content": out],
-                             "finish_reason": "stop"]],
-            ]
-            let body = try? JSONSerialization.data(withJSONObject: payload)
-            let head = HTTPURLResponse(url: request.url!, statusCode: 200,
-                                       httpVersion: "HTTP/1.1",
-                                       headerFields: ["Content-Type": "application/json"])!
-            client?.urlProtocol(reporter, didReceive: head, cacheStoragePolicy: .notAllowed)
-            if let body { client?.urlProtocol(reporter, didLoad: body) }
-            client?.urlProtocolDidFinishLoading(reporter)
-            log("[Web通道] \(sl)→\(tl) 长度=\(text.count)")
-        }.resume()
-    }
-
-    /// 读请求体：URLSession 常把 httpBody 转成流，两处都取
-    private static func requestBody(of request: URLRequest) -> Data? {
-        if let body = request.httpBody { return body }
-        guard let stream = request.httpBodyStream else { return nil }
-        stream.open()
-        defer { stream.close() }
-        var data = Data()
-        let bufSize = 16 * 1024
-        let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
-        defer { buf.deallocate() }
-        while stream.hasBytesAvailable {
-            let n = stream.read(buf, maxLength: bufSize)
-            guard n > 0 else { break }
-            data.append(buf, count: n)
-        }
-        return data
-    }
-
-    /// 从系统提示词还原语种：「Translate the text from X into Y.」（AiPrompt.builtins translate 模板）
-    /// 解析失败回落：源=自动检测，目标=中→英/其余→中
-    private static func languages(fromPrompt system: String, text: String) -> (String, String) {
-        var sl = "", tl = ""
-        if let r = system.range(of: "from (.+?) into (.+?)\\.", options: .regularExpression) {
-            let m = String(system[r])
-            let parts = m.replacingOccurrences(of: "from ", with: "")
-                .replacingOccurrences(of: ".", with: "")
-                .components(separatedBy: " into ")
-            if parts.count == 2 {
-                sl = TLanguage.all.first { $0.prompt == parts[0] }?.code ?? ""
-                tl = TLanguage.all.first { $0.prompt == parts[1] }?.code ?? ""
-            }
-        }
-        let source = sl.isEmpty ? OllamaClient.detect(text) : sl
-        let target = tl.isEmpty ? OllamaClient.autoTarget(for: source) : tl
-        return (source, target)
-    }
-
-    /// 内部代码 → MyMemory 语言对代码
-    private static func googleCode(_ code: String) -> String {
-        code == "zh" ? "zh-CN" : (code.isEmpty ? "en" : code)
-    }
-
-    private static func mkErr(_ msg: String) -> NSError {
-        NSError(domain: "WebTranslateChannel", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])
-    }
-}
 
 // MARK: - 开机自启（SMAppService，查状态幂等）
 

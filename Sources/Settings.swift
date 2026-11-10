@@ -7,7 +7,7 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
     /// 对应 setPageMenuIndex：下次打开跳到该页（读后即删）
     static var pendingPageIndex: Int?
 
-    private let menuTitles = ["偏好设置", "高级设置", "全局快捷键设置", "翻译源设置", "AI 提示词", "配置文件设置", "关于"]
+    private let menuTitles = ["偏好设置", "高级设置", "全局快捷键设置", "翻译源设置", "配置文件设置", "关于"]
     private var menuButtons: [NSButton] = []
     private let tabs = NSTabView()
     private let statusLabel = NSTextField(labelWithString: "")
@@ -21,7 +21,6 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
     private let delayField = NSTextField()
     private let fontField = NSTextField()
     // 翻译源
-    private let channelPop = NSPopUpButton()
     private let urlField = NSTextField()
     private let modelField = NSTextField()
 
@@ -62,7 +61,6 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
         addPage(buildAdvanced())
         addPage(buildShortcuts())
         addPage(buildSource())
-        addPage(note("AI 提示词：原生版使用内置翻译提示词，暂不支持自定义（未实现）。"))
         addPage(buildConfigFile())
         addPage(buildAbout())
         EscMonitor.add(self)
@@ -176,10 +174,10 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
     private func buildSource() -> NSView {
         let v = page()
         label(v, "翻译通道", 520)
-        channelPop.addItems(withTitles: Config.channelNames)
-        channelPop.frame = NSRect(x: 160, y: 516, width: 280, height: 26)
-        channelPop.target = self; channelPop.action = #selector(channelChanged)
-        v.addSubview(channelPop)
+        let ch = NSTextField(labelWithString: "Ollama（本地 / 自建 OpenAI 兼容接口）")
+        ch.frame = NSRect(x: 160, y: 520, width: 380, height: 20)
+        ch.textColor = .secondaryLabelColor
+        v.addSubview(ch)
         label(v, "接口地址", 490)
         urlField.frame = NSRect(x: 160, y: 488, width: 460, height: 22)
         urlField.placeholderString = "http://127.0.0.1:11434/v1/chat/completions"
@@ -188,30 +186,11 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
         modelField.frame = NSRect(x: 160, y: 453, width: 460, height: 22)
         modelField.placeholderString = "Ollama 模型名，如 hymt2"
         v.addSubview(modelField)
-        let webNote = NSTextField(wrappingLabelWithString: "Web 翻译通道免接口、免模型，开箱即用（MyMemory，语种跟随窗口语言栏）。两通道共用语言栏与提示词入口。")
-        webNote.frame = NSRect(x: 160, y: 385, width: 460, height: 44)
-        webNote.textColor = .secondaryLabelColor
-        webNote.font = .systemFont(ofSize: 11)
-        v.addSubview(webNote)
         let save = NSButton(title: "保存", target: self, action: #selector(saveSource))
         save.bezelStyle = .rounded; save.keyEquivalent = "\r"
         save.frame = NSRect(x: 520, y: 340, width: 100, height: 28)
         v.addSubview(save)
         return v
-    }
-
-    /// 切换通道：Web 通道不需要接口地址/模型名，禁用输入并即时生效
-    @objc private func channelChanged() {
-        Config.channel = Config.channels[max(0, channelPop.indexOfSelectedItem)]
-        refreshChannelFields()
-        statusLabel.stringValue = Config.channel == "web" ? "已切换到 Web 翻译通道（免配置）" : "已切换到 Ollama 通道"
-        log("[设置] 翻译通道 → \(Config.channel)")
-    }
-
-    private func refreshChannelFields() {
-        let ollama = Config.channel == "ollama"
-        urlField.isEnabled = ollama
-        modelField.isEnabled = ollama
     }
 
     private func buildConfigFile() -> NSView {
@@ -246,8 +225,6 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
         fontField.stringValue = "\(Config.winFontSize)"
         urlField.stringValue = Config.ollamaURL
         modelField.stringValue = Config.model
-        channelPop.selectItem(at: Config.channels.firstIndex(of: Config.channel) ?? 0)
-        refreshChannelFields()
         for (k, f) in shortcutFields { f.stringValue = Config.shortcut(k) }
         applyTheme()
     }
@@ -317,14 +294,10 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
     }
 
     @objc private func saveSource() {
-        Config.channel = Config.channels[max(0, channelPop.indexOfSelectedItem)]
         Config.ollamaURL = urlField.stringValue.trimmingCharacters(in: .whitespaces)
         Config.model = modelField.stringValue.trimmingCharacters(in: .whitespaces)
-        // Web 通道不依赖模型名，但请求前置校验要求非空（OllamaClient.call）→ 占位一个
-        if Config.channel == "web" && Config.model.isEmpty { Config.model = "mymemory" }
-        refreshChannelFields()
         statusLabel.stringValue = "已保存"
-        log("[设置] 翻译源已保存 通道=\(Config.channel)")
+        log("[设置] 翻译源已保存")
     }
 
     @objc private func grantAX() { SelectionReader.promptAccessibility() }

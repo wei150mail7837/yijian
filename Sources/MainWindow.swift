@@ -654,6 +654,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         let rh = resultTextHeight
         if abs(rh - lastLaidResultH) > 0.5 {
             lastLaidResultH = rh
+            animateNextResize = true   // 打字增行同样走平滑动画
             layoutContent()
         }
         resultView.scrollToEndOfDocument(nil)
