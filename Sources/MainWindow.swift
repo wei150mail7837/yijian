@@ -53,24 +53,24 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     private let bg = NSVisualEffectView()
     private let root = FlippedView()
     // Header
-    private let pinButton = NSButton()
-    private let settingsButton = NSButton()
+    private let pinButton = IconButton()
+    private let settingsButton = IconButton()
     // 输入区
     private let inputView = InputTextView()
     private let inputScroll = NSScrollView()
     // 语言栏
     private let srcPop = NSPopUpButton(frame: .zero, pullsDown: false)
     private let dstPop = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let swapButton = NSButton()
+    private let swapButton = IconButton()
     // 结果卡
     private let card = NSView()
     private let cardTitle = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
-    private let foldButton = NSButton()
+    private let foldButton = IconButton()
     private let resultView = NSTextView()
-    private let copyButton = NSButton()
-    private let camelButton = NSButton()
-    private let snakeButton = NSButton()
+    private let copyButton = IconButton()
+    private let camelButton = IconButton()
+    private let snakeButton = IconButton()
     private let sourceToggle = NSButton()
     private let sourceLabel = NSTextField(wrappingLabelWithString: "")
     private var sourceExpanded = false
@@ -176,15 +176,8 @@ final class MainWindow: NSWindow, NSWindowDelegate {
 
     // MARK: - 构建
 
-    private func iconButton(_ b: NSButton, symbol: String, tip: String, action: Selector) {
-        b.bezelStyle = .regularSquare
-        b.isBordered = false
-        b.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
-        b.imagePosition = .imageOnly
-        b.toolTip = tip
-        b.target = self
-        b.action = action
-        b.contentTintColor = .secondaryLabelColor
+    private func iconButton(_ b: IconButton, symbol: String, tip: String, action: Selector) {
+        b.configure(symbol: symbol, tip: tip, action: action)
     }
 
     private func textButton(_ b: NSButton, title: String, action: Selector) {
@@ -827,6 +820,76 @@ enum EscMonitor {
             }
             keyWindow.orderOut(nil)
             return nil
+        }
+    }
+}
+
+/// 无边框图标按钮：悬停高亮、按压加深、执行后短暂闪烁，反馈明确
+final class IconButton: NSButton {
+    private var hover = false
+    private var flash: Timer?
+
+    init(symbol: String = "", tip: String = "", action: Selector? = nil) {
+        super.init(frame: .zero)
+        setButtonType(.momentaryPushIn)
+        isBordered = false
+        imagePosition = .imageOnly
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        configure(symbol: symbol, tip: tip, action: action ?? Selector(("noop")))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func configure(symbol: String, tip: String, action: Selector) {
+        image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
+        toolTip = tip
+        self.action = action
+        target = nil                                    // nil = responder 链，最终命中所属窗口控制器
+        contentTintColor = .secondaryLabelColor
+        updateVisual()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingAreas.first(where: { $0.options.contains(.mouseEnteredAndExited) }) { return }
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { hover = true; updateVisual() }
+    override func mouseExited(with event: NSEvent) { hover = false; updateVisual() }
+
+    // 按压态由 isHighlighted 驱动，NSButton 会在按下/抬起时置位
+    override var isHighlighted: Bool {
+        didSet { updateVisual() }
+    }
+
+    // 点击后闪一下强调色作为回执
+    override func mouseUp(with event: NSEvent) {
+        let wasHighlighted = isHighlighted
+        super.mouseUp(with: event)
+        if !wasHighlighted { flashFeedback() }
+    }
+
+    /// 动作执行后的视觉回执：闪一下强调色
+    func flashFeedback() {
+        flash?.invalidate()
+        contentTintColor = .controlAccentColor
+        flash = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
+            self?.updateVisual()
+        }
+    }
+
+    private func updateVisual() {
+        if isHighlighted {
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.28).cgColor
+            contentTintColor = .controlAccentColor
+        } else if hover {
+            layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+            contentTintColor = .labelColor
+        } else {
+            layer?.backgroundColor = NSColor.clear.cgColor
+            contentTintColor = .secondaryLabelColor
         }
     }
 }
