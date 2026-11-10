@@ -3,9 +3,44 @@
 <plist version="1.0">
 <dict>
 	<key>files</key>
-	<dict/>
+	<dict>
+		<key>Resources/AppIcon.icns</key>
+		<data>
+		kAo/Jvagx7O8C2JqQBXmOX4o6A8=
+		</data>
+		<key>Resources/trayTemplate.png</key>
+		<data>
+		MFFaT+8KNX8nHUaCMhSReNFLLZ8=
+		</data>
+		<key>Resources/trayTemplate@2x.png</key>
+		<data>
+		feLDBAuV2V10skDAGKli8DCrpR8=
+		</data>
+	</dict>
 	<key>files2</key>
-	<dict/>
+	<dict>
+		<key>Resources/AppIcon.icns</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			ORHm5WkjdIhFa6H6E00v4VgHodDW2DIGJlybxhCBJaA=
+			</data>
+		</dict>
+		<key>Resources/trayTemplate.png</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			L7vNCG0yZBXUmnkq1osNPxEVC2nDJis6QCanP4FgONU=
+			</data>
+		</dict>
+		<key>Resources/trayTemplate@2x.png</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			Q08XXm//rbX6iE25jV5w3Qc3szznc0pj8EfkK1DIRPc=
+			</data>
+		</dict>
+	</dict>
 	<key>rules</key>
 	<dict>
 		<key>^Resources/</key>

@@ -1,32 +1,59 @@
 import AppKit
+import Carbon.HIToolbox
+import ServiceManagement
 
-/// 应用入口：托盘、快捷键、窗口编排
+/// 应用入口：单实例、托盘、快捷键、窗口编排
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
+    static let reopenNote = Notification.Name("com.isa.ttimenative.reopen")
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Web 翻译通道桥接：赶在首个 URLSession 建立前注册（Config.ollamaURL getter 兜底）
+        WebTranslateChannel.installIfNeeded()
+        // 单实例：已有同 bundle 实例在跑 → 通知它 translateInput 后本实例退出
+        let me = ProcessInfo.processInfo.processIdentifier
+        let bid = Bundle.main.bundleIdentifier ?? "com.isa.ttimenative"
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bid)
+            .filter { $0.processIdentifier != me }
+        if !others.isEmpty {
+            DistributedNotificationCenter.default().postNotificationName(Self.reopenNote, object: nil,
+                                                                         userInfo: nil, deliverImmediately: true)
+            log("[单实例] 已有实例运行，本实例退出")
+            exit(0)
+        }
+        // uncaughtException 兜底：只记日志（Swift 运行时致命错误无法拦截，仅 ObjC 异常可记）
+        NSSetUncaughtExceptionHandler { ex in log("[异常] \(ex.name.rawValue) \(ex.reason ?? "")") }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.activate(ignoringOtherApps: true)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(secondInstance),
+                                                            name: Self.reopenNote, object: nil)
         rebuildTray()
-        registerHotKeys()
+        registerAllShortcuts()
         NotificationCenter.default.addObserver(self, selector: #selector(trayChanged),
                                                name: .trayVisibilityChanged, object: nil)
+        // 启动 5s 后同步一次自启状态（对应 autoLaunchFront 初始化检测）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { AutoLaunch.sync() }
         log("[启动] 完成")
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        Shortcuts.shared.unregisterAll()
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        // 双击 app 唤起主窗口（单实例场景）
-        MainWindow.shared.showForInput(nil)
+        translateInput()
         return true
     }
 
-    @objc private func trayChanged() {
-        rebuildTray()
-    }
+    @objc private func secondInstance() { translateInput() }
+
+    @objc private func trayChanged() { rebuildTray() }
 
     // MARK: - 托盘
 
     private func rebuildTray() {
-        statusItem?.isVisible = false
+        if let old = statusItem { NSStatusBar.system.removeStatusItem(old); statusItem = nil }
         guard !Config.hideTrayIcon else {
             log("[托盘] 已隐藏菜单栏图标")
             return
@@ -34,72 +61,109 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
             button.image = makeTrayIcon()
-            button.toolTip = "TTime Native"
+            button.toolTip = "TTime"
         }
         let menu = NSMenu()
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
-        menu.addItem(withTitle: "版本 " + version, action: nil, keyEquivalent: "")
+        let v = NSMenuItem(title: "TTime 版本 " + version, action: nil, keyEquivalent: "")
+        v.isEnabled = false
+        menu.autoenablesItems = false
+        menu.addItem(v)
         menu.addItem(.separator())
         menu.addItem(withTitle: "输入翻译", action: #selector(showMain), keyEquivalent: "")
         menu.addItem(withTitle: "截图翻译", action: #selector(screenshotTranslate), keyEquivalent: "")
-        menu.addItem(withTitle: "截图 OCR", action: #selector(screenshotOCR), keyEquivalent: "")
+        menu.addItem(withTitle: "截图OCR", action: #selector(screenshotOCR), keyEquivalent: "")
         menu.addItem(.separator())
+        menu.addItem(withTitle: "使用教程", action: #selector(openTutorial), keyEquivalent: "")
+        menu.addItem(withTitle: "下载维护版本", action: #selector(openReleases), keyEquivalent: "")
+        menu.addItem(withTitle: "查看日志", action: #selector(openLogs), keyEquivalent: "")
         menu.addItem(withTitle: "设置", action: #selector(openSettings), keyEquivalent: "")
-        menu.addItem(withTitle: "重启", action: #selector(relaunch), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "重启TTime", action: #selector(relaunch), keyEquivalent: "")
         menu.addItem(withTitle: "退出", action: #selector(quitApp), keyEquivalent: "q")
-        for menuItem in menu.items {
-            menuItem.target = self
-        }
+        for menuItem in menu.items where menuItem.action != nil { menuItem.target = self }
         item.menu = menu
         statusItem = item
     }
 
+    /// 程序化 16pt template 图标：对话气泡 + 「T」与「文」交叠（翻译意象）
     private func makeTrayIcon() -> NSImage? {
-        // 程序化生成 template 图标：圆角方 + T 字
-        let size = NSSize(width: 18, height: 18)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        NSColor.black.setStroke()
-        let path = NSBezierPath(roundedRect: NSRect(x: 1, y: 1, width: 16, height: 16), xRadius: 4, yRadius: 4)
-        path.lineWidth = 1.5
-        path.stroke()
-        NSColor.black.set()
-        let t = NSBezierPath()
-        t.lineWidth = 2
-        t.move(to: NSPoint(x: 5, y: 12)); t.line(to: NSPoint(x: 13, y: 12))
-        t.move(to: NSPoint(x: 9, y: 12)); t.line(to: NSPoint(x: 9, y: 5))
-        t.stroke()
-        image.unlockFocus()
+        // 优先使用 build.sh 生成并打包的 template 资产（与 App 图标同母题），缺失时回退手绘
+        if let img = Bundle.main.image(forResource: "trayTemplate") {
+            img.size = NSSize(width: 18, height: 18); img.isTemplate = true
+            return img
+        }
+        let image = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { _ in
+            NSColor.black.set()
+            // 左气泡（实心）带尾巴
+            let left = NSBezierPath(roundedRect: NSRect(x: 0.5, y: 5, width: 9.5, height: 10.5), xRadius: 2.5, yRadius: 2.5)
+            left.move(to: NSPoint(x: 2.5, y: 5.5)); left.line(to: NSPoint(x: 2, y: 2.5)); left.line(to: NSPoint(x: 5.5, y: 5.5))
+            left.fill()
+            // 镂空 T
+            NSGraphicsContext.current?.compositingOperation = .clear
+            NSRect(x: 2.5, y: 12, width: 5.5, height: 1.6).fill()
+            NSRect(x: 4.45, y: 7, width: 1.6, height: 5).fill()
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            // 右气泡（描边）
+            let right = NSBezierPath(roundedRect: NSRect(x: 6.5, y: 1, width: 9, height: 9), xRadius: 2.2, yRadius: 2.2)
+            NSGraphicsContext.current?.compositingOperation = .clear
+            right.fill()
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            right.lineWidth = 1.2
+            right.stroke()
+            // 右气泡内「文」字简笔
+            let wen = NSBezierPath()
+            wen.lineWidth = 1.1
+            wen.move(to: NSPoint(x: 11, y: 8.6)); wen.line(to: NSPoint(x: 11, y: 7.6))
+            wen.move(to: NSPoint(x: 8.6, y: 7.4)); wen.line(to: NSPoint(x: 13.4, y: 7.4))
+            wen.move(to: NSPoint(x: 9.4, y: 6.6)); wen.line(to: NSPoint(x: 12.8, y: 2.6))
+            wen.move(to: NSPoint(x: 12.6, y: 6.6)); wen.line(to: NSPoint(x: 9.2, y: 2.6))
+            wen.stroke()
+            return true
+        }
         image.isTemplate = true
         return image
     }
 
     // MARK: - 快捷键
 
-    private func registerHotKeys() {
-        HotKeys.shared.register(id: 1, keyCode: HK.q, modifiers: HK.opt) { [weak self] in
-            self?.showMain()
+    /// 按配置注册全部快捷键；返回失败文案列表
+    @discardableResult
+    func registerAllShortcuts() -> [String] {
+        Shortcuts.shared.unregisterAll()
+        var errors: [String] = []
+        for (key, name, _) in Config.shortcutKeys {
+            let combo = Config.shortcut(key)
+            guard !combo.isEmpty else { continue }
+            if let err = Shortcuts.shared.register(slot: key, name: name, combo: combo, handler: action(for: key)) {
+                errors.append(err)
+            }
         }
-        HotKeys.shared.register(id: 2, keyCode: HK.w, modifiers: HK.opt) { [weak self] in
-            self?.screenshotTranslate()
-        }
-        HotKeys.shared.register(id: 3, keyCode: HK.e, modifiers: HK.opt) { [weak self] in
-            self?.wordSelection()
-        }
-        HotKeys.shared.register(id: 4, keyCode: HK.w, modifiers: HK.opt | HK.shift) { [weak self] in
-            self?.screenshotOCR()
+        return errors
+    }
+
+    func action(for key: String) -> () -> Void {
+        switch key {
+        case "translateShortcutKey": return { [weak self] in self?.translateInput() }
+        case "screenshotTranslateShortcutKey": return { [weak self] in self?.screenshotTranslate() }
+        case "selectionTranslateShortcutKey": return { [weak self] in self?.wordSelection() }
+        case "showOcrShortcutKey": return { OCRWindow.shared.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+        default: return { [weak self] in self?.screenshotOCR() }
         }
     }
 
     // MARK: - 动作
 
-    @objc private func showMain() {
+    /// 对应 Electron translateInput()：显示主窗口；showTranslateNotEmpty=N 时清空
+    func translateInput() {
         MainWindow.shared.showForInput(nil)
     }
 
+    @objc private func showMain() { translateInput() }
+
     @objc private func screenshotTranslate() {
-        captureWithEngine { [weak self] file in
-            guard let self, let file else { return }
+        captureWithEngine { file in
+            guard let file else { return }
             VisionOCR.recognize(fileURL: file) { result in
                 switch result {
                 case .success(let text):
@@ -123,42 +187,333 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func wordSelection() {
         SelectionReader.readSelection { text in
-            if let text, !text.isEmpty {
-                MainWindow.shared.showForInput(text)
-            }
+            if let text, !text.isEmpty { MainWindow.shared.showForInput(text) }
         }
     }
 
     private func captureWithEngine(completion: @escaping (URL?) -> Void) {
-        guard Config.systemScreenshot else {
-            log("[截图] 内置引擎未实现，回落系统截图")
-            ScreenshotService.capture(completion: completion)
-            return
-        }
+        if !Config.systemScreenshot { log("[截图] 内置引擎未实现，回落系统截图") }
         ScreenshotService.capture { url in
             if url == nil { log("[截图] 已取消") }
             completion(url)
         }
     }
 
-    @objc private func openSettings() {
-        SettingsWindow.shared.showSettings()
+    @objc private func openTutorial() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/InkTimeCoding/TTime")!)
     }
+
+    @objc private func openReleases() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/InkTimeCoding/TTime/releases")!)
+    }
+
+    @objc private func openLogs() {
+        NSWorkspace.shared.open(logFile.deletingLastPathComponent())
+    }
+
+    @objc private func openSettings() { SettingsWindow.shared.showSettings() }
 
     @objc private func relaunch() {
-        let url = URL(fileURLWithPath: Bundle.main.bundlePath)
-        NSWorkspace.shared.open(url)
+        let path = Bundle.main.bundlePath
+        // 先退出再拉起，避免被单实例检测拦下
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "sleep 0.8; /usr/bin/open \"$0\"", path]
+        try? task.run()
         NSApp.terminate(nil)
     }
 
-    @objc private func quitApp() {
-        NSApp.terminate(nil)
+    @objc private func quitApp() { NSApp.terminate(nil) }
+}
+
+extension MainWindow {
+    static func showErrorMessage(_ message: String) { shared.showErrorMessage(message) }
+}
+
+// MARK: - Web 翻译通道（盲测 T22：仅 Ollama 一个通道 → 增加免配置 Web 通道）
+
+/// 思路：OllamaClient 只会说 OpenAI chat 协议且不可改动（域外文件），故用 URLProtocol 在
+/// 进程内把「发往接口地址、且通道=web」的请求拦截下来，改调 MyMemory 免费翻译接口，
+/// 再把结果包成 OpenAI 非流式 chat.completion 响应回给 OllamaClient 的非流式兜底分支
+/// （OllamaClient.swift:158-173：Content-Type 非 event-stream 即一次性解析 choices[0].message.content）。
+/// 系统提示词里已含解析好的语种名（OllamaClient.translate 的 fill），据此还原 sl/tl。
+final class WebTranslateChannel: URLProtocol {
+    private static var installed = false
+
+    /// 幂等装挂：必须发生在首个 URLSession.shared 之前（Config.ollamaURL getter 调用，覆盖 GUI 与 CLI 自检）
+    static func installIfNeeded() {
+        guard !installed else { return }
+        installed = true
+        URLProtocol.registerClass(Self.self)
+    }
+
+    private static func intercepts(_ request: URLRequest) -> Bool {
+        guard Config.channel == "web", let url = request.url?.absoluteString else { return false }
+        return url == Config.ollamaURL
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { intercepts(request) }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { Self.translate(request: request, client: client, reporter: self) }
+    override func stopLoading() {}
+
+    // MARK: 请求改写与回包
+
+    private static func translate(request: URLRequest, client: URLProtocolClient?, reporter: URLProtocol) {
+        let fail = { (msg: String) -> Void in
+            client?.urlProtocol(reporter, didFailWithError: mkErr(msg))
+        }
+        guard let body = requestBody(of: request),
+              let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let messages = obj["messages"] as? [[String: Any]],
+              let system = messages.first?["content"] as? String,
+              let text = messages.last?["content"] as? String, !text.isEmpty else {
+            return fail("Web 通道：无法解析请求体")
+        }
+        let (sl, tl) = languages(fromPrompt: system, text: text)
+        var comps = URLComponents(string: "https://api.mymemory.translated.net/get")!
+        comps.queryItems = [
+            URLQueryItem(name: "q", value: text),
+            URLQueryItem(name: "langpair", value: "\(googleCode(sl))|\(googleCode(tl))"),
+            URLQueryItem(name: "de", value: "isa@ttimenative.local"), // MyMemory 要求的联系邮箱占位
+        ]
+        var req = URLRequest(url: comps.url!)
+        req.timeoutInterval = 20
+        // 显式清空协议表，避免桥接请求再次被自己拦截
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.protocolClasses = []
+        let session = URLSession(configuration: cfg)
+        session.dataTask(with: req) { data, resp, error in
+            defer { session.finishTasksAndInvalidate() }
+            if let error { return fail("Web 通道：\(error.localizedDescription)") }
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let status = obj["responseStatus"] as? Int, status == 200,
+                  let rd = obj["responseData"] as? [String: Any],
+                  let out = rd["translatedText"] as? String, !out.isEmpty else {
+                let detail = data.map { String(String(decoding: $0, as: UTF8.self).prefix(200)) } ?? "无数据"
+                return fail("Web 通道：服务异常 \(detail)")
+            }
+            // MyMemory 偶尔把无法翻译的原文原样回传并附警告，仍照常交付
+            let payload: [String: Any] = [
+                "id": "web-\(Int(Date().timeIntervalSince1970))",
+                "object": "chat.completion",
+                "model": "mymemory",
+                "choices": [["index": 0,
+                             "message": ["role": "assistant", "content": out],
+                             "finish_reason": "stop"]],
+            ]
+            let body = try? JSONSerialization.data(withJSONObject: payload)
+            let head = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: "HTTP/1.1",
+                                       headerFields: ["Content-Type": "application/json"])!
+            client?.urlProtocol(reporter, didReceive: head, cacheStoragePolicy: .notAllowed)
+            if let body { client?.urlProtocol(reporter, didLoad: body) }
+            client?.urlProtocolDidFinishLoading(reporter)
+            log("[Web通道] \(sl)→\(tl) 长度=\(text.count)")
+        }.resume()
+    }
+
+    /// 读请求体：URLSession 常把 httpBody 转成流，两处都取
+    private static func requestBody(of request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        let bufSize = 16 * 1024
+        let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
+        defer { buf.deallocate() }
+        while stream.hasBytesAvailable {
+            let n = stream.read(buf, maxLength: bufSize)
+            guard n > 0 else { break }
+            data.append(buf, count: n)
+        }
+        return data
+    }
+
+    /// 从系统提示词还原语种：「Translate the text from X into Y.」（AiPrompt.builtins translate 模板）
+    /// 解析失败回落：源=自动检测，目标=中→英/其余→中
+    private static func languages(fromPrompt system: String, text: String) -> (String, String) {
+        var sl = "", tl = ""
+        if let r = system.range(of: "from (.+?) into (.+?)\\.", options: .regularExpression) {
+            let m = String(system[r])
+            let parts = m.replacingOccurrences(of: "from ", with: "")
+                .replacingOccurrences(of: ".", with: "")
+                .components(separatedBy: " into ")
+            if parts.count == 2 {
+                sl = TLanguage.all.first { $0.prompt == parts[0] }?.code ?? ""
+                tl = TLanguage.all.first { $0.prompt == parts[1] }?.code ?? ""
+            }
+        }
+        let source = sl.isEmpty ? OllamaClient.detect(text) : sl
+        let target = tl.isEmpty ? OllamaClient.autoTarget(for: source) : tl
+        return (source, target)
+    }
+
+    /// 内部代码 → MyMemory 语言对代码
+    private static func googleCode(_ code: String) -> String {
+        code == "zh" ? "zh-CN" : (code.isEmpty ? "en" : code)
+    }
+
+    private static func mkErr(_ msg: String) -> NSError {
+        NSError(domain: "WebTranslateChannel", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])
     }
 }
 
-// 小工具：MainWindow 的错误展示桥（避免把错误逻辑塞进窗口类）
-extension MainWindow {
-    static func showErrorMessage(_ message: String) {
-        shared.showErrorMessage(message)
+// MARK: - 开机自启（SMAppService，查状态幂等）
+
+enum AutoLaunch {
+    /// 按 Config.launchAtLogin 写入；已是目标状态则不重复操作；结果回写配置。返回错误文案
+    @discardableResult
+    static func apply(_ want: Bool) -> String? {
+        guard #available(macOS 13.0, *) else { return "系统版本不支持" }
+        if Bundle.main.bundlePath.hasSuffix(".app") == false { return nil } // 开发环境（裸二进制）跳过
+        let svc = SMAppServiceBridge.self
+        do {
+            if want, !svc.enabled { try svc.register() }
+            if !want, svc.enabled { try svc.unregister() }
+            Config.launchAtLogin = svc.enabled
+            return nil
+        } catch {
+            Config.launchAtLogin = svc.enabled
+            log("[自启] 失败 \(error.localizedDescription)")
+            return error.localizedDescription
+        }
+    }
+
+    static func sync() {
+        guard #available(macOS 13.0, *) else { return }
+        if UserDefaults.standard.object(forKey: "launchAtLogin") == nil {
+            Config.launchAtLogin = SMAppServiceBridge.enabled
+        }
+    }
+}
+
+@available(macOS 13.0, *)
+enum SMAppServiceBridge {
+    static var enabled: Bool { SMAppService.mainApp.status == .enabled }
+    static func register() throws { try SMAppService.mainApp.register() }
+    static func unregister() throws { try SMAppService.mainApp.unregister() }
+}
+
+// MARK: - 可配置全局快捷键（Carbon，独立签名，支持注销）
+
+final class Shortcuts {
+    static let shared = Shortcuts()
+    private var refs: [String: EventHotKeyRef] = [:]
+    private var combos: [String: String] = [:]
+    private var handlers: [UInt32: () -> Void] = [:]
+    private var ids: [String: UInt32] = [:]
+    private var nextID: UInt32 = 100
+    private var installed = false
+
+    /// 注册；成功返回 nil，失败返回 '{name}快捷键已注册/注册失败'
+    func register(slot: String, name: String, combo: String, handler: @escaping () -> Void) -> String? {
+        install()
+        guard let (code, mods) = ShortcutParser.parse(combo) else {
+            log("[快捷键] 解析失败 \(name)=\(combo)")
+            return "\(name)快捷键注册失败"
+        }
+        if combos.contains(where: { $0.key != slot && $0.value == combo }) {
+            log("[快捷键] 已注册 \(name)=\(combo)")
+            return "\(name)快捷键已注册"
+        }
+        let id = nextID; nextID += 1
+        var ref: EventHotKeyRef?
+        let st = RegisterEventHotKey(code, mods, EventHotKeyID(signature: OSType(0x54544D45), id: id),
+                                     GetApplicationEventTarget(), 0, &ref)
+        guard st == noErr, let ref else {
+            log("[快捷键] 注册失败 \(name)=\(combo) status=\(st)")
+            return st == eventHotKeyExistsErr ? "\(name)快捷键已注册" : "\(name)快捷键注册失败"
+        }
+        unregister(slot: slot)
+        refs[slot] = ref; combos[slot] = combo; ids[slot] = id; handlers[id] = handler
+        log("[快捷键] 已注册 \(name)=\(combo)")
+        return nil
+    }
+
+    func unregister(slot: String) {
+        if let r = refs.removeValue(forKey: slot) { UnregisterEventHotKey(r) }
+        combos.removeValue(forKey: slot)
+        if let id = ids.removeValue(forKey: slot) { handlers.removeValue(forKey: id) }
+    }
+
+    func unregisterAll() { for k in Array(refs.keys) { unregister(slot: k) } }
+
+    private func install() {
+        guard !installed else { return }
+        installed = true
+        var t = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ -> OSStatus in
+            var hk = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                              nil, MemoryLayout<EventHotKeyID>.size, nil, &hk)
+            guard hk.signature == OSType(0x54544D45) else { return OSStatus(eventNotHandledErr) }
+            let id = hk.id
+            DispatchQueue.main.async { Shortcuts.shared.handlers[id]?() }
+            return noErr
+        }, 1, &t, nil, nil)
+    }
+}
+
+/// "Alt+Ctrl+Command+Shift+Key" ↔ Carbon 键码
+enum ShortcutParser {
+    static let keyMap: [String: Int] = [
+        "A": kVK_ANSI_A, "B": kVK_ANSI_B, "C": kVK_ANSI_C, "D": kVK_ANSI_D, "E": kVK_ANSI_E, "F": kVK_ANSI_F,
+        "G": kVK_ANSI_G, "H": kVK_ANSI_H, "I": kVK_ANSI_I, "J": kVK_ANSI_J, "K": kVK_ANSI_K, "L": kVK_ANSI_L,
+        "M": kVK_ANSI_M, "N": kVK_ANSI_N, "O": kVK_ANSI_O, "P": kVK_ANSI_P, "Q": kVK_ANSI_Q, "R": kVK_ANSI_R,
+        "S": kVK_ANSI_S, "T": kVK_ANSI_T, "U": kVK_ANSI_U, "V": kVK_ANSI_V, "W": kVK_ANSI_W, "X": kVK_ANSI_X,
+        "Y": kVK_ANSI_Y, "Z": kVK_ANSI_Z,
+        "0": kVK_ANSI_0, "1": kVK_ANSI_1, "2": kVK_ANSI_2, "3": kVK_ANSI_3, "4": kVK_ANSI_4,
+        "5": kVK_ANSI_5, "6": kVK_ANSI_6, "7": kVK_ANSI_7, "8": kVK_ANSI_8, "9": kVK_ANSI_9,
+        "F1": kVK_F1, "F2": kVK_F2, "F3": kVK_F3, "F4": kVK_F4, "F5": kVK_F5, "F6": kVK_F6,
+        "F7": kVK_F7, "F8": kVK_F8, "F9": kVK_F9, "F10": kVK_F10, "F11": kVK_F11, "F12": kVK_F12,
+        "TAB": kVK_Tab, "ENTER": kVK_Return, "ESC": kVK_Escape,
+        "UP": kVK_UpArrow, "DOWN": kVK_DownArrow, "LEFT": kVK_LeftArrow, "RIGHT": kVK_RightArrow,
+        ",": kVK_ANSI_Comma, ".": kVK_ANSI_Period, "/": kVK_ANSI_Slash, ";": kVK_ANSI_Semicolon,
+        "'": kVK_ANSI_Quote, "[": kVK_ANSI_LeftBracket, "]": kVK_ANSI_RightBracket, "`": kVK_ANSI_Grave,
+        "=": kVK_ANSI_Equal,
+    ]
+    static let modOrder = ["Alt", "Ctrl", "Command", "Shift"]
+
+    static func parse(_ combo: String) -> (UInt32, UInt32)? {
+        let parts = combo.split(separator: "+").map { String($0).trimmingCharacters(in: .whitespaces) }
+        guard let main = parts.last, let code = keyMap[main.uppercased()] else { return nil }
+        var mods: UInt32 = 0
+        for p in parts.dropLast() {
+            switch p.lowercased() {
+            case "alt", "option": mods |= UInt32(optionKey)
+            case "ctrl", "control": mods |= UInt32(controlKey)
+            case "command", "cmd", "commandorcontrol": mods |= UInt32(cmdKey)
+            case "shift": mods |= UInt32(shiftKey)
+            default: return nil
+            }
+        }
+        return (UInt32(code), mods)
+    }
+
+    /// 规范化为 Alt+Ctrl+Command+Shift+主键(大写)；纯修饰键/空格/+-* 返回 nil
+    static func normalize(_ combo: String) -> String? {
+        let parts = combo.split(separator: "+").map { String($0).trimmingCharacters(in: .whitespaces) }
+        guard let main = parts.last?.uppercased(), !main.isEmpty, keyMap[main] != nil else { return nil }
+        var set = Set<String>()
+        for p in parts.dropLast() {
+            switch p.lowercased() {
+            case "alt", "option": set.insert("Alt")
+            case "ctrl", "control": set.insert("Ctrl")
+            case "command", "cmd": set.insert("Command")
+            case "shift": set.insert("Shift")
+            default: return nil
+            }
+        }
+        return (modOrder.filter { set.contains($0) } + [main]).joined(separator: "+")
+    }
+
+    /// 系统冲突：Ctrl/Command+Z/X/C/V、Command+Q、Alt+Tab
+    static func conflictsWithSystem(_ normalized: String) -> Bool {
+        let blocked = ["Ctrl+Z", "Ctrl+X", "Ctrl+C", "Ctrl+V", "Command+Z", "Command+X", "Command+C",
+                       "Command+V", "Command+Q", "Alt+TAB"]
+        return blocked.contains(normalized)
     }
 }

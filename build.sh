@@ -29,6 +29,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>CFBundleExecutable</key><string>TTimeNative</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
@@ -37,7 +38,16 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-# 占位 icns 不必须；ad-hoc 签名保证本地运行
+echo "[2.5/3] 图标（assets/make_icon.swift 程序化生成）..."
+ICONTMP=$(mktemp -d)
+swift assets/make_icon.swift "$ICONTMP"
+iconutil -c icns "$ICONTMP/AppIcon.iconset" -o "$RES/AppIcon.icns"
+cp "$ICONTMP/trayTemplate.png" "$ICONTMP/trayTemplate@2x.png" "$RES/"
+cp "$RES/AppIcon.icns" assets/AppIcon.icns
+cp "$ICONTMP"/trayTemplate*.png assets/
+rm -rf "$ICONTMP"
+
+# ad-hoc 签名保证本地运行
 echo "[3/3] ad-hoc 签名..."
 codesign --force --sign - "$APP"
 
