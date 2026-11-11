@@ -23,6 +23,9 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
     // 翻译源
     private let urlField = NSTextField()
     private let modelField = NSTextField()
+    private let keyField = NSTextField()
+    private let argsField = NSTextField()
+    private let promptPop = NSPopUpButton()
 
     private init() {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 850, height: 600),
@@ -182,9 +185,27 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
         modelField.frame = NSRect(x: 160, y: 453, width: 460, height: 22)
         modelField.placeholderString = "Ollama 模型名，如 hymt2"
         v.addSubview(modelField)
+        label(v, "API Key", 420)
+        keyField.frame = NSRect(x: 160, y: 418, width: 460, height: 22)
+        keyField.placeholderString = "可选；自建接口需要鉴权时填写（请求头 Authorization: Bearer …）"
+        v.addSubview(keyField)
+        label(v, "请求参数", 385)
+        argsField.frame = NSRect(x: 160, y: 383, width: 460, height: 22)
+        argsField.placeholderString = "{\"temperature\":0.1}（JSON，留空用默认）"
+        v.addSubview(argsField)
+        label(v, "翻译提示词", 350)
+        promptPop.addItems(withTitles: AiPrompt.builtins.map { $0.id })
+        promptPop.frame = NSRect(x: 160, y: 348, width: 280, height: 26)
+        promptPop.selectItem(at: AiPrompt.builtins.firstIndex { $0.id == UserDefaults.standard.string(forKey: "aiPromptId") } ?? 0)
+        v.addSubview(promptPop)
+        let hint = NSTextField(wrappingLabelWithString: "远程接口（需鉴权/自定义参数）在此填写；本地 Ollama 通常两项留空即可。提示词决定翻译/润色等行为。")
+        hint.frame = NSRect(x: 160, y: 300, width: 460, height: 40)
+        hint.textColor = .secondaryLabelColor
+        hint.font = .systemFont(ofSize: 11)
+        v.addSubview(hint)
         let save = NSButton(title: "保存", target: self, action: #selector(saveSource))
         save.bezelStyle = .rounded; save.keyEquivalent = "\r"
-        save.frame = NSRect(x: 520, y: 340, width: 100, height: 28)
+        save.frame = NSRect(x: 520, y: 250, width: 100, height: 28)
         v.addSubview(save)
         return v
     }
@@ -209,6 +230,9 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
         fontField.stringValue = "\(Config.winFontSize)"
         urlField.stringValue = Config.ollamaURL
         modelField.stringValue = Config.model
+        keyField.stringValue = UserDefaults.standard.string(forKey: "appKey") ?? ""
+        argsField.stringValue = UserDefaults.standard.string(forKey: "requestArguments") ?? ""
+        promptPop.selectItem(at: AiPrompt.builtins.firstIndex { $0.id == UserDefaults.standard.string(forKey: "aiPromptId") } ?? 0)
         for (k, f) in shortcutFields { f.stringValue = Config.shortcut(k) }
         applyTheme()
     }
@@ -240,10 +264,11 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
     @objc private func prefChanged() {
         Config.theme = themePop.indexOfSelectedItem
         Config.showPosition = positionPop.indexOfSelectedItem
-        if let n = Int(topField.stringValue) { Config.topPercent = n }
-        if let n = Int(delayField.stringValue) { Config.selectionDelay = n }
-        if let n = Int(fontField.stringValue) { Config.winFontSize = n }
+        if let n = Int(topField.stringValue), (1...200).contains(n) { Config.topPercent = n }
+        if let n = Int(delayField.stringValue) { Config.selectionDelay = n }   // setter 自带 100-1000 clamp
+        if let n = Int(fontField.stringValue) { Config.winFontSize = n }       // setter 自带 10-30 clamp
         reload()
+        statusLabel.stringValue = "已保存（超出范围的数值按上下限收敛）"
         NotificationCenter.default.post(name: .settingsChanged, object: nil)
     }
 
@@ -279,6 +304,13 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
     @objc private func saveSource() {
         Config.ollamaURL = urlField.stringValue.trimmingCharacters(in: .whitespaces)
         Config.model = modelField.stringValue.trimmingCharacters(in: .whitespaces)
+        let key = keyField.stringValue.trimmingCharacters(in: .whitespaces)
+        if key.isEmpty { UserDefaults.standard.removeObject(forKey: "appKey") }
+        else { UserDefaults.standard.set(key, forKey: "appKey") }
+        let args = argsField.stringValue.trimmingCharacters(in: .whitespaces)
+        if args.isEmpty { UserDefaults.standard.removeObject(forKey: "requestArguments") }
+        else { UserDefaults.standard.set(args, forKey: "requestArguments") }
+        UserDefaults.standard.set(AiPrompt.builtins[max(0, promptPop.indexOfSelectedItem)].id, forKey: "aiPromptId")
         statusLabel.stringValue = "已保存"
         log("[设置] 翻译源已保存")
     }

@@ -1,7 +1,7 @@
 import AppKit
 
 /// 偏好读取（对齐 Electron StoreService 键名；Config.swift 属 shell 域，此处直接读 UserDefaults）
-private enum Pref {
+enum Pref {
     static let d = UserDefaults.standard
     static func flag(_ key: String) -> Bool { d.string(forKey: key) == "Y" || d.bool(forKey: key) }
     static var thumbtack: Bool {
@@ -59,11 +59,12 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     private let inputView = InputTextView()
     private let inputScroll = NSScrollView()
     // 语言栏
-    private let srcPop = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let dstPop = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let srcButton = LanguageBarButton(isSource: true)
+    private let dstButton = LanguageBarButton(isSource: false)
     private let swapButton = IconButton()
     // 结果卡
     private let card = NSView()
+    private var cardIconView: NSImageView?
     private let cardTitle = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     private let foldButton = IconButton()
@@ -83,10 +84,9 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     private var animateNextResize = false
     private var fontSize: CGFloat { CGFloat(Config.winFontSize) }
     // toast
-    private let toast = NSTextField(labelWithString: "")
-    private var toastWork: DispatchWorkItem?
-    private var toastColor: NSColor = .separatorColor
-    private var toastGeneration = 0
+    private let toastContainer = NSView()      // toast 堆叠容器（对齐 ElMessage 多条堆叠）
+    private var toastCards: [ToastCardView] = []
+    private let copyInputButton = IconButton()
     // 打字机：记录上次参与布局的结果高度，未变化帧跳过全量重排
     private var lastLaidResultH: CGFloat = -1
 
@@ -161,10 +161,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
             self.inputScroll.layer?.borderColor = NSColor.separatorColor.cgColor
             self.inputScroll.layer?.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.6).cgColor
             self.applyCardStyle()
-            if !self.toast.isHidden {
-                self.toast.backgroundColor = self.toastColor.withAlphaComponent(0.15)
-                self.toast.layer?.borderColor = self.toastColor.withAlphaComponent(0.5).cgColor
-            }
+            self.toastCards.forEach { $0.applyTheme() }
         }
     }
 
@@ -192,8 +189,10 @@ final class MainWindow: NSWindow, NSWindowDelegate {
 
     private func buildHeader() {
         iconButton(pinButton, symbol: "pin", tip: "置顶", action: #selector(togglePin))
+        iconButton(copyInputButton, symbol: "doc.plaintext", tip: "复制输入内容", action: #selector(copyInput))
         iconButton(settingsButton, symbol: "gearshape", tip: "设置", action: #selector(openSettings))
         root.addSubview(pinButton)
+        root.addSubview(copyInputButton)
         root.addSubview(settingsButton)
     }
 
@@ -232,14 +231,10 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     private let placeholder = NSTextField(labelWithString: "请输入单词或文字")
 
     private func buildLanguageBar() {
-        for (pop, sel) in [(srcPop, Pref.inputLanguage), (dstPop, Pref.resultLanguage)] {
-            pop.controlSize = .small
-            pop.font = .systemFont(ofSize: 12)
-            pop.addItems(withTitles: TLanguage.all.map { $0.name })
-            pop.selectItem(at: TLanguage.all.firstIndex { $0.code == sel } ?? 0)
-            pop.target = self
-            pop.action = #selector(languageChanged)
-            root.addSubview(pop)
+        for (btn, sel) in [(srcButton, Pref.inputLanguage), (dstButton, Pref.resultLanguage)] {
+            btn.refreshTitle(current: sel)
+            btn.rootWindow = self
+            root.addSubview(btn)
         }
         iconButton(swapButton, symbol: "arrow.left.arrow.right", tip: "互换", action: #selector(swapLanguages))
         root.addSubview(swapButton)
@@ -251,7 +246,22 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         card.layer?.borderWidth = 1
         root.addSubview(card)
         cardTitle.font = .boldSystemFont(ofSize: 12)
-        card.addSubview(cardTitle)
+        let logo = NSImageView()
+        logo.image = NSImage(size: NSSize(width: 14, height: 14), flipped: false) { rect in
+            NSColor.labelColor.setStroke()
+            let p = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
+            p.lineWidth = 1.2; p.stroke()
+            NSColor.labelColor.set()
+            let t = NSBezierPath(); t.lineWidth = 1.6
+            t.move(to: NSPoint(x: rect.width*0.28, y: rect.height*0.72))
+            t.line(to: NSPoint(x: rect.width*0.72, y: rect.height*0.72))
+            t.move(to: NSPoint(x: rect.width*0.5, y: rect.height*0.72))
+            t.line(to: NSPoint(x: rect.width*0.5, y: rect.height*0.28))
+            t.stroke()
+            return true
+        }
+        cardIconView = logo
+        card.addSubview(logo)
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
@@ -290,13 +300,9 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     }
 
     private func buildToast() {
-        toast.alignment = .center
-        toast.font = .systemFont(ofSize: 12, weight: .medium)
-        toast.wantsLayer = true
-        toast.layer?.cornerRadius = 8
-        toast.isHidden = true
-        toast.drawsBackground = true
-        root.addSubview(toast)
+        // 堆叠式 toast 容器（对齐 ElMessage：可多条并存、滑入动画、图形图标、长文本换行）
+        toastContainer.wantsLayer = true
+        root.addSubview(toastContainer)
     }
 
     // MARK: - 布局（自上而下）
@@ -336,6 +342,8 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         let inner = w - margin * 2
         var y: CGFloat = 6
         pinButton.frame = NSRect(x: margin, y: y, width: 24, height: 22)
+        copyInputButton.frame = NSRect(x: margin + 28, y: y, width: 24, height: 22)
+        copyInputButton.isHidden = hideInput || inputView.string.isEmpty
         settingsButton.frame = NSRect(x: w - margin - 24, y: y, width: 24, height: 22)
         y += headerH
 
@@ -350,19 +358,20 @@ final class MainWindow: NSWindow, NSWindowDelegate {
             y += ih + 6
         }
 
-        [srcPop, dstPop, swapButton].forEach { $0.isHidden = hideLanguage }
+        [srcButton, dstButton, swapButton].forEach { $0.isHidden = hideLanguage }
         if !hideLanguage {
             let pw = (inner - 36) / 2
-            srcPop.frame = NSRect(x: margin, y: y, width: pw, height: 24)
+            srcButton.frame = NSRect(x: margin, y: y, width: pw, height: 24)
             swapButton.frame = NSRect(x: margin + pw + 6, y: y + 1, width: 24, height: 22)
-            dstPop.frame = NSRect(x: margin + pw + 36, y: y, width: pw, height: 24)
+            dstButton.frame = NSRect(x: margin + pw + 36, y: y, width: pw, height: 24)
             y += langH + 4
         }
 
         // 结果卡
         let cw = inner
         cardTitle.stringValue = "AI · \(Config.model.isEmpty ? "未配置模型" : Config.model)"
-        cardTitle.frame = NSRect(x: 10, y: 6, width: cw - 70, height: 16)
+        cardIconView?.frame = NSRect(x: 10, y: 7, width: 14, height: 14)
+        cardTitle.frame = NSRect(x: 28, y: 6, width: cw - 88, height: 16)
         spinner.frame = NSRect(x: cw - 52, y: 5, width: 16, height: 16)
         foldButton.frame = NSRect(x: cw - 30, y: 3, width: 22, height: 20)
         foldButton.image = NSImage(systemSymbolName: folded ? "chevron.down" : "chevron.up", accessibilityDescription: nil)
@@ -411,11 +420,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         card.frame = NSRect(x: margin, y: y, width: cw, height: ch + 4)
         y += ch + 4 + margin
 
-        if !toast.isHidden {
-            toast.sizeToFit()
-            let tw = min(inner, toast.frame.width + 24)
-            toast.frame = NSRect(x: (w - tw) / 2, y: 6, width: tw, height: 24)
-        }
+        relayoutToasts()
         autoHeight(y)
     }
 
@@ -516,7 +521,8 @@ final class MainWindow: NSWindow, NSWindowDelegate {
             var pct = Pref.d.double(forKey: "fromTopOfWindowPercentage")
             if pct < 1 || pct > 200 { pct = 30 }
             let sf = scr.frame
-            let topOffset = sf.height / 2 * (pct * 2 / 100)
+            // 对齐 Lite GlobalWin.ts:112-118：pct=50 时窗口垂直居中 → 分母含窗口自身高度
+            let topOffset = (sf.height - frame.height) / 2 * (pct * 2 / 100)
             setFrameTopLeftPoint(NSPoint(x: sf.minX + (sf.width - frame.width) / 2, y: sf.maxY - topOffset))
         default:
             break
@@ -579,8 +585,8 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         applyCardStyle()
         animateNextResize = true
         layoutContent()
-        let src = TLanguage.all[max(0, srcPop.indexOfSelectedItem)].code
-        let dst = TLanguage.all[max(0, dstPop.indexOfSelectedItem)].code
+        let src = Pref.inputLanguage
+        let dst = Pref.resultLanguage
         OllamaClient.shared.translate(text: text, source: src, target: dst, onDelta: { [weak self] piece in
             DispatchQueue.main.async {
                 guard let self, rid == self.activeRequestId else { return } // 旧请求丢弃
@@ -687,42 +693,63 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     enum ToastKind { case success, warning, error }
 
     func showToast(_ text: String, kind: ToastKind) {
-        toastWork?.cancel()
-        toastGeneration += 1 // 新 toast 作废旧 fade-out 的隐藏回调
-        let gen = toastGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            guard let self else { return }
-            let color: NSColor = kind == .success ? .systemGreen : kind == .warning ? .systemOrange : .systemRed
-            self.toastColor = color
-            let icon = kind == .success ? "✓ " : kind == .warning ? "! " : "✕ "
-            self.toast.stringValue = icon + text
-            self.toast.textColor = color
-            self.toast.backgroundColor = color.withAlphaComponent(0.15)
-            self.toast.layer?.borderColor = color.withAlphaComponent(0.5).cgColor
-            self.toast.layer?.borderWidth = 1
-            self.toast.isHidden = false
-            self.toast.alphaValue = 0
-            self.layoutContent()
-            // 入场：fade in（对齐 ElMessage 的进出动画）
-            NSAnimationContext.runAnimationGroup { ctx in
+            self?.pushToast(text: text, kind: kind)
+        }
+    }
+
+    /// 堆叠式 toast：最多 3 条并存，滑入动画，SF Symbol 图标，长文本换行
+    private func pushToast(text: String, kind: ToastKind) {
+        let color: NSColor = kind == .success ? .systemGreen : kind == .warning ? .systemOrange : .systemRed
+        let symbol = kind == .success ? "checkmark.circle.fill" : kind == .warning ? "exclamationmark.triangle.fill" : "xmark.circle.fill"
+        let card = ToastCardView(text: text, color: color, symbol: symbol)
+        toastCards.append(card)
+        toastContainer.addSubview(card)
+        // 超过 3 条：最旧的立即移除
+        while toastCards.count > 3 {
+            let old = toastCards.removeFirst()
+            old.removeFromSuperview()
+        }
+        relayoutToasts()
+        card.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.18
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            card.animator().alphaValue = 1
+        }
+        let gen = ObjectIdentifier(card)
+        DispatchQueue.main.asyncAfter(deadline: .now() + (kind == .error ? 5 : 2.5)) { [weak self, weak card] in
+            guard let card else { return }
+            NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.18
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                self.toast.animator().alphaValue = 1
-            }
-            let work = DispatchWorkItem { [weak self] in
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                card.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
                 guard let self else { return }
-                // 出场：fade out 后再隐藏
-                NSAnimationContext.runAnimationGroup({ ctx in
-                    ctx.duration = 0.18
-                    ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
-                    self.toast.animator().alphaValue = 0
-                }, completionHandler: { [weak self] in
-                    guard let self, gen == self.toastGeneration else { return }
-                    self.toast.isHidden = true
-                })
-            }
-            self.toastWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + (kind == .error ? 5 : 2.5), execute: work)
+                card.removeFromSuperview()
+                self.toastCards.removeAll { ObjectIdentifier($0) == gen }
+                self.relayoutToasts()
+            })
+        }
+    }
+
+    /// 依剩余卡片重排（顶部居中堆叠，最新在最上）
+    private func relayoutToasts() {
+        let w = root.bounds.width
+        let top = w > 0 ? headerH + 4 : 8
+        var yy: CGFloat = 0
+        for card in toastCards {
+            card.layoutSelf()
+            let cw = min(root.bounds.width - margin * 2, max(card.frame.width + 40, 160))
+            let chh = card.frame.height + 8
+            card.frame = NSRect(x: (w - cw) / 2, y: 0, width: cw, height: chh)
+            yy += chh + 6
+        }
+        // 自上而下：从容器顶往下排
+        var fromTop: CGFloat = top
+        for card in toastCards {
+            card.frame.origin.y = root.bounds.height - fromTop - card.frame.height
+            fromTop += card.frame.height + 6
         }
     }
 
@@ -736,7 +763,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
 
     private func applyPin() {
         pinButton.image = NSImage(systemSymbolName: pinned ? "pin.fill" : "pin", accessibilityDescription: "置顶")
-        pinButton.contentTintColor = pinned ? .systemBlue : .secondaryLabelColor
+        pinButton.emphasized = pinned   // 强调态由 IconButton.updateVisual 统一管理
         level = pinned ? .floating : .normal
     }
 
@@ -746,19 +773,26 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         SettingsWindow.shared.showSettings()
     }
 
-    @objc private func languageChanged() {
-        Pref.inputLanguage = TLanguage.all[max(0, srcPop.indexOfSelectedItem)].code
-        Pref.resultLanguage = TLanguage.all[max(0, dstPop.indexOfSelectedItem)].code
+    /// 语种变更（LanguagePanel 回调）：源=自动/具体语种；目标若是 auto 则按检测方向落地
+    func languagesUpdated() {
+        if Pref.resultLanguage == "auto" {
+            Pref.resultLanguage = OllamaClient.autoTarget(for: Pref.inputLanguage == "auto"
+                ? "x" : Pref.inputLanguage)
+        }
+        srcButton.refreshTitle(current: Pref.inputLanguage)
+        dstButton.refreshTitle(current: Pref.resultLanguage)
     }
 
     @objc private func swapLanguages() {
-        let a = srcPop.indexOfSelectedItem
-        srcPop.selectItem(at: dstPop.indexOfSelectedItem)
-        dstPop.selectItem(at: a)
-        languageChanged()
+        let a = Pref.inputLanguage
+        Pref.inputLanguage = Pref.resultLanguage == "auto" ? OllamaClient.autoTarget(for: "x") : Pref.resultLanguage
+        Pref.resultLanguage = a == "auto" ? OllamaClient.autoTarget(for: "x") : a
+        srcButton.refreshTitle(current: Pref.inputLanguage)
+        dstButton.refreshTitle(current: Pref.resultLanguage)
     }
 
     @objc private func toggleFold() {
+        guard !lastFullResult.isEmpty else { return }   // Lite 空内容点击不动作
         folded.toggle()
         animateNextResize = true
         layoutContent()
@@ -790,6 +824,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     }
 
     @objc private func copyResult() { copy(isError ? "" : lastFullResult) }
+    @objc private func copyInput() { copy(inputView.string) }
     @objc private func copyCamel() { copy(MainWindow.camelCase(lastFullResult)) }
     @objc private func copySnake() { copy(MainWindow.snakeCase(lastFullResult)) }
 
@@ -861,10 +896,13 @@ final class IconButton: NSButton {
         updateVisual()
     }
 
+    /// 强调态（如置顶按钮按下时保持强调色，不被悬停/常态覆盖）
+    var emphasized = false
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        if let existing = trackingAreas.first(where: { $0.options.contains(.mouseEnteredAndExited) }) { return }
-        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow],
+        // .inVisibleRect：bounds 变化（初始隐藏→显形）时跟踪区自动跟随，避免零尺寸死区
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
                                        owner: self, userInfo: nil))
     }
 
@@ -876,11 +914,10 @@ final class IconButton: NSButton {
         didSet { updateVisual() }
     }
 
-    // 点击后闪一下强调色作为回执
-    override func mouseUp(with event: NSEvent) {
-        let wasHighlighted = isHighlighted
-        super.mouseUp(with: event)
-        if !wasHighlighted { flashFeedback() }
+    // 点击回执：flash 由动作侧触发，mouseUp 在 NSButton 跟踪循环内不可靠
+    override func mouseDown(with event: NSEvent) {
+        flashFeedback()
+        super.mouseDown(with: event)
     }
 
     /// 动作执行后的视觉回执：闪一下强调色
@@ -896,6 +933,11 @@ final class IconButton: NSButton {
         if isHighlighted {
             layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.28).cgColor
             contentTintColor = .controlAccentColor
+        } else if emphasized {
+            // 强调态（置顶）：常态保持强调色，悬停加深，按压更亮
+            layer?.backgroundColor = (hover ? NSColor.controlAccentColor.withAlphaComponent(0.35)
+                                            : NSColor.controlAccentColor.withAlphaComponent(0.22)).cgColor
+            contentTintColor = .controlAccentColor
         } else if hover {
             layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
             contentTintColor = .labelColor
@@ -903,5 +945,48 @@ final class IconButton: NSButton {
             layer?.backgroundColor = NSColor.clear.cgColor
             contentTintColor = .secondaryLabelColor
         }
+    }
+}
+
+/// 单条 toast 卡：SF Symbol 图标 + 换行文本
+final class ToastCardView: NSView {
+    private let icon = NSImageView()
+    private let label = NSTextField(wrappingLabelWithString: "")
+    private let color: NSColor
+
+    init(text: String, color: NSColor, symbol: String) {
+        self.color = color
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 30))
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.masksToBounds = true
+        layer?.borderWidth = 1
+        layer?.borderColor = color.withAlphaComponent(0.5).cgColor
+        layer?.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.92).cgColor
+
+        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        icon.contentTintColor = color
+        icon.frame = NSRect(x: 10, y: 8, width: 14, height: 14)
+        addSubview(icon)
+
+        label.stringValue = text
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.textColor = color
+        label.preferredMaxLayoutWidth = 320
+        addSubview(label)
+        layoutSelf()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func applyTheme() {
+        layer?.borderColor = NSColor.separatorColor.cgColor
+    }
+
+    func layoutSelf() {
+        label.preferredMaxLayoutWidth = 320
+        let sz = label.sizeThatFits(NSSize(width: 320, height: 400))
+        let textH = max(sz.height, 16)
+        label.frame = NSRect(x: 30, y: (textH + 12 - textH) / 2, width: sz.width + 2, height: textH)
+        frame.size = NSSize(width: 30 + sz.width + 14, height: textH + 12)
     }
 }

@@ -18,7 +18,12 @@ struct TLanguage {
         TLanguage(code: "de", name: "德语", prompt: "Deutsch"),
         TLanguage(code: "es", name: "西班牙语", prompt: "Español")
     ]
-    static func find(_ code: String) -> TLanguage { all.first { $0.code == code } ?? all[0] }
+    static func find(_ key: String) -> TLanguage {
+        // 任意解析：内部 code / 提示词语种名（129 语种表 LanguageList 的 type）/ 界面名都可作为 key；
+        // 表外语种动态合成（prompt 直接用该语种名，Ollama 模型可理解自然语言语种名）
+        if let m = all.first(where: { $0.code == key || $0.prompt == key || $0.name == key }) { return m }
+        return TLanguage(code: key, name: key, prompt: key)
+    }
 }
 
 /// 内置提示词模板（对齐 aiPrompts.ts：translate/polish/summarize/analyze/code，system+user 双消息）

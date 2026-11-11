@@ -37,9 +37,12 @@ private final class OCRImageView: NSView {
         guard let image else { return }
         image.draw(in: imageRect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         guard showBoxes, let r = result else { return }
-        NSColor.systemRed.withAlphaComponent(0.85).setStroke()
+        // 对齐 Lite #468cff：1.5px 描边 + 8% 填充
+        NSColor(red: 0x46/255.0, green: 0x8c/255.0, blue: 0xff/255.0, alpha: 0.08).setFill()
+        NSColor(red: 0x46/255.0, green: 0x8c/255.0, blue: 0xff/255.0, alpha: 1).setStroke()
         for l in r.lines {
-            let p = NSBezierPath(rect: viewRect(l.box)); p.lineWidth = 1; p.stroke()
+            let p = NSBezierPath(rect: viewRect(l.box)); p.lineWidth = 1.5
+            p.fill(); p.stroke()
         }
     }
 }
@@ -82,11 +85,13 @@ final class OCRWindow: NSWindow, NSWindowDelegate {
         let copyImg = Self.button("复制图片", self, #selector(copyImage))
         let copyTxt = Self.button("复制文本", self, #selector(copyText))
         let translate = Self.button("调起翻译", self, #selector(sendToTranslate))
+        let settings = Self.button("设置", self, #selector(openSettings))
         let close = Self.button("✕", self, #selector(hideWindow))
+        let pin = Self.button("📌", self, #selector(togglePin))
 
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true; scroll.borderType = .bezelBorder; scroll.drawsBackground = false
-        textView.isEditable = false; textView.isRichText = false
+        textView.isEditable = true; textView.isRichText = false
         textView.font = .systemFont(ofSize: 13)
         textView.isVerticallyResizable = true; textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
@@ -150,7 +155,15 @@ final class OCRWindow: NSWindow, NSWindowDelegate {
     override func performClose(_ sender: Any?) { orderOut(nil) }
     func windowShouldClose(_ sender: NSWindow) -> Bool { orderOut(nil); return false }
     /// 失焦且未置顶时自动隐藏
-    func windowDidResignKey(_ notification: Notification) { if level == .normal { orderOut(nil) } }
+    func windowDidResignKey(_ notification: Notification) { if !pinned { orderOut(nil) } }
+
+    /// 图钉置顶（对齐 Lite ocrThumbtack/ocrAlwaysOnTop）
+    private var pinned = false
+    @objc private func togglePin() {
+        pinned.toggle()
+        level = pinned ? .floating : .normal
+    }
+    @objc private func openSettings() { SettingsWindow.shared.showSettings() }
 
     func run(imageFile: URL) {
         self.imageFile = imageFile
@@ -171,9 +184,7 @@ final class OCRWindow: NSWindow, NSWindowDelegate {
             case .failure(let error):
                 self.textView.string = ""
                 log("[OCR] 失败")
-                let alert = NSAlert(); alert.alertStyle = .critical
-                alert.messageText = "文字识别失败"; alert.informativeText = error.localizedDescription
-                alert.beginSheetModal(for: self)
+                MainWindow.shared.showErrorMessage("文字识别失败：\(error.localizedDescription)")
             }
         }
     }
@@ -185,11 +196,17 @@ final class OCRWindow: NSWindow, NSWindowDelegate {
         guard let img = imgView.image else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([img])
+        MainWindow.shared.showToast("复制成功", kind: .success)
     }
 
     @objc private func copyText() {
+        let text = textView.string
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            MainWindow.shared.showToast("复制的文本内容为空", kind: .warning); return
+        }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(textView.string, forType: .string)
+        NSPasteboard.general.setString(text, forType: .string)
+        MainWindow.shared.showToast("复制成功", kind: .success)
     }
 
     @objc private func sendToTranslate() {

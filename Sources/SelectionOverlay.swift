@@ -21,7 +21,6 @@ final class SelectionOverlay {
     fileprivate var current: NSPoint?
     fileprivate var dragging = false
     fileprivate var magnifier = MagnifierView()
-    fileprivate var toolbar: [NSButton] = []
 
     static func begin(completion: @escaping (URL?) -> Void) {
         guard active == nil else { return }
@@ -97,67 +96,24 @@ final class SelectionOverlay {
 
     fileprivate func redraw() { windows.forEach { $0.contentView?.needsDisplay = true } }
 
-    /// 松开：选区有效则进入工具条确认态，否则结束
+    /// 松开（对齐 Lite preload/screenshot.ts done()）：选区有效即完成；
+    /// 误点/选区过小（<3pt）不退出，停留在选区态可重新框选
     fileprivate func mouseUp() {
         dragging = false
         magnifier.hide()
-        guard let r = selection, r.width >= 3, r.height >= 3 else { finish(nil); return }
-        showToolbar(for: r)
-        redraw()
-    }
-
-    /// 重新开始拖拽：退出确认态并撤掉工具条
-    fileprivate func restartDrag(at point: NSPoint) {
-        hideToolbar()
-        start = point
-        current = point
-        dragging = true
-        redraw()
-    }
-
-    private func showToolbar(for rect: NSRect) {
-        hideToolbar()
-        let corner = NSPoint(x: rect.maxX, y: rect.maxY)
-        let host = windows.last(where: { $0.frame.contains(corner) }) ?? windows.first
-        guard let window = host else { return }
-        let origin = window.frame.origin
-        let local = rect.offsetBy(dx: -origin.x, dy: -origin.y)
-        let bw: CGFloat = 44
-        let bh: CGFloat = 30
-        let gap: CGFloat = 6
-        let edge: CGFloat = 4
-        let totalW = bw * 2 + gap
-        var x = min(local.maxX - totalW - edge, window.frame.width - totalW - 8)
-        var y = local.minY - bh - 8
-        if y < edge { y = local.maxY + 8 }
-        if x < edge { x = edge }
-
-        let confirm = NSButton(title: "✓ 确认", target: self, action: #selector(toolbarConfirm))
-        confirm.bezelStyle = .texturedRounded
-        confirm.frame = NSRect(x: x, y: y, width: bw, height: bh)
-        let cancel = NSButton(title: "✕", target: self, action: #selector(toolbarCancel))
-        cancel.bezelStyle = .texturedRounded
-        cancel.frame = NSRect(x: x + bw + gap, y: y, width: bw, height: bh)
-        for b in [confirm, cancel] {
-            window.contentView?.addSubview(b)
-            toolbar.append(b)
+        guard let r = selection, r.width >= 3, r.height >= 3 else {
+            start = nil
+            current = nil
+            redraw()
+            return
         }
+        finish(r)
     }
-
-    private func hideToolbar() {
-        toolbar.forEach { $0.removeFromSuperview() }
-        toolbar.removeAll()
-    }
-
-    @objc private func toolbarConfirm() { finish(selection) }
-
-    @objc private func toolbarCancel() { finish(nil) }
 
     fileprivate func finish(_ rect: NSRect?) {
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         magnifier.hide()
         NSCursor.pop()
-        hideToolbar()
         windows.forEach { $0.orderOut(nil) }
         windows.removeAll()
         let done = completion; completion = nil
@@ -226,16 +182,18 @@ private final class OverlayView: NSView {
         return w.convertPoint(toScreen: e.locationInWindow)
     }
 
-    override func mouseDown(with e: NSEvent) {
-        // 确认态下重新按下 = 放弃旧选区重新框选
-        owner?.restartDrag(at: global(e))
-    }
+    override func mouseDown(with e: NSEvent) { owner?.start = global(e); owner?.current = owner?.start; owner?.redraw() }
     // 拖拽事件只送达按下所在窗口，但 locationInWindow 越界仍有效 → 全局坐标天然支持跨屏
     override func mouseDragged(with e: NSEvent) {
         let p = global(e)
         owner?.current = p
         owner?.redraw()
         updateMagnifier(at: p)
+    }
+    override func mouseMoved(with e: NSEvent) {
+        // 未按下时放大镜也跟随（对齐 Lite document.mousemove 常显），辅助起点瞄准
+        updateMagnifier(at: global(e))
+        owner?.redraw()
     }
     override func mouseUp(with e: NSEvent) { owner?.current = global(e); owner?.mouseUp() }
     override func rightMouseDown(with e: NSEvent) { owner?.finish(nil) }
@@ -284,10 +242,11 @@ private final class OverlayView: NSView {
         NSColor.black.withAlphaComponent(0.75).setFill()
         NSBezierPath(roundedRect: badge, xRadius: 4, yRadius: 4).fill()
         label.draw(at: NSPoint(x: badge.minX + 5, y: badge.minY + 2), withAttributes: attrs)
-        // 放大镜只画在包含光标的窗口，位于光标侧边
-        if owner.dragging, let cursor = owner.current, owner.magnifier.ready,
+        // 放大镜常显（拖拽中/未按下均跟随光标），只画在包含光标的窗口，位于光标侧边
+        if let cursor = owner.current, owner.magnifier.ready,
+           let fs = owner.frozenScreen(containing: cursor),
            let mf = owner.magnifier.frame(in: w, cursorGlobal: cursor) {
-            owner.magnifier.drawContent(in: mf, screenPoint: cursor, frozen: owner.frozenScreen(containing: cursor) ?? owner.frozenScreen(containing: NSPoint.zero)!)
+            owner.magnifier.drawContent(in: mf, screenPoint: cursor, frozen: fs)
         }
     }
 }
