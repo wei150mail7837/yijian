@@ -1,0 +1,5 @@
+.build/
+TTimeNative.app/
+dist/
+*.dmg
+.DS_Store
