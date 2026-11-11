@@ -68,6 +68,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     private let spinner = NSProgressIndicator()
     private let foldButton = IconButton()
     private let resultView = NSTextView()
+    private let resultScroll = NSScrollView()
     private let copyButton = IconButton()
     private let camelButton = IconButton()
     private let snakeButton = IconButton()
@@ -264,7 +265,12 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         resultView.isRichText = false
         resultView.drawsBackground = false
         resultView.textContainerInset = NSSize(width: 2, height: 2)
-        card.addSubview(resultView)
+        // 长译文滚动：内容超出结果区高度时可滚动（对齐 Lite .block-layer overflow:auto）
+        resultScroll.hasVerticalScroller = true
+        resultScroll.borderType = .noBorder
+        resultScroll.drawsBackground = false
+        resultScroll.documentView = resultView
+        card.addSubview(resultScroll)
         // 原文折叠行（AI 卡：原文默认折叠）
         textButton(sourceToggle, title: "▸ 原文", action: #selector(toggleSource))
         sourceToggle.isBordered = false
@@ -381,13 +387,15 @@ final class MainWindow: NSWindow, NSWindowDelegate {
                     ch += sh + 4
                 }
             }
-            resultView.frame = NSRect(x: 6, y: ch, width: cw - 12, height: 10)
+            resultScroll.frame = NSRect(x: 6, y: ch, width: cw - 12, height: 10)
             resultView.textContainer?.containerSize = NSSize(width: cw - 16, height: .greatestFiniteMagnitude)
             // 填充驱动：结果区 ≥ 内容高度，且填满窗口剩余空间（手动拉伸窗口时跟随）
             let availCard = root.bounds.height - y - margin
             let fillH = availCard - ch - 28   // 28 = 结果下方按钮行 + 卡片内边距
             let rh = max(resultTextHeight, fillH)
-            resultView.frame.size.height = rh
+            resultScroll.frame.size.height = rh
+            resultView.minSize = NSSize(width: resultScroll.contentSize.width, height: rh)
+            resultView.frame.size.width = resultScroll.contentSize.width
             lastLaidResultH = rh // layoutContent 任何路径重排后同步基线，避免打字机误判
             ch += rh + 4
             if !lastFullResult.isEmpty && spinner.isHidden {
@@ -816,6 +824,8 @@ enum EscMonitor {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard event.keyCode == 53, let keyWindow = NSApp.keyWindow, targets.contains(keyWindow) else { return event }
+            // 快捷键录制器正在录入：Esc 归它处理（取消录入），不隐藏窗口
+            if keyWindow.firstResponder is ShortcutRecorder { return event }
             if keyWindow === MainWindow.shared, MainWindow.shared.isPinned,
                UserDefaults.standard.string(forKey: "alwaysOnTopAllowEscStatus") != "Y" {
                 return event

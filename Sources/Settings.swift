@@ -215,7 +215,8 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
 
     private func select(_ i: Int) {
         tabs.selectTabViewItem(at: i)
-        for item in menuItems { item.selected = (item.tag == i) }
+        // 注意：SidebarItem 的身份字段是 itemTag（NSView.tag 恒为默认 -1，勿用）
+        for item in menuItems { item.selected = (item.itemTag == i) }
         statusLabel.stringValue = ""
     }
 

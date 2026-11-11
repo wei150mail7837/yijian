@@ -71,10 +71,12 @@ enum Config {
 
     // MARK: 偏好设置
     static var hideInput: Bool {
-        get { flag("translateInputHideStatus", false) } set { setFlag("translateInputHideStatus", newValue) }
+        // 键名与主窗读取（MainWindow Pref "hideTranslateInput"）及 Lite（StoreService.ts:199）一致；
+        // 旧键 translateInputHideStatus 无读取方，已废弃
+        get { flag("hideTranslateInput", false) } set { setFlag("hideTranslateInput", newValue) }
     }
     static var hideLanguageBar: Bool {
-        get { flag("languageSelectHideStatus", false) } set { setFlag("languageSelectHideStatus", newValue) }
+        get { flag("hideTranslateLanguage", false) } set { setFlag("hideTranslateLanguage", newValue) }
     }
     /// 显示位置：写入 MainWindow 读取的同一键 translateShowPositionType
     /// 下拉索引 0=LAST_TIME 1=FROM_TOP 2=FOLLOW_MOUSE
