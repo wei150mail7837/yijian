@@ -382,15 +382,20 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         [copyButton, camelButton, snakeButton].forEach { $0.isHidden = true }
         if showBody {
             if !sourceToggle.isHidden {
+                // 固定尺寸（勿用 sizeToFit：inline bezel 反复调用会累计 padding 导致按钮逐次变高）
                 sourceToggle.title = sourceExpanded ? "▾ 原文" : "▸ 原文"
-                sourceToggle.sizeToFit()
-                sourceToggle.frame.origin = NSPoint(x: 6, y: ch - 2)
+                sourceToggle.frame = NSRect(x: 6, y: ch - 2, width: 64, height: 16)
                 ch += 18
                 if sourceExpanded {
                     sourceLabel.font = .systemFont(ofSize: max(10, fontSize - 2))
                     sourceLabel.stringValue = lastSourceText
                     sourceLabel.preferredMaxLayoutWidth = cw - 20
-                    let sh = min(ceil(sourceLabel.sizeThatFits(NSSize(width: cw - 20, height: 400)).height), 120)
+                    // 确定性高度：按字体与宽度直接算，不经视图自身 sizeThatFits（其结果随 frame 漂移）
+                    let sh = min(ceil((lastSourceText as NSString).boundingRect(
+                        with: NSSize(width: cw - 20, height: .greatestFiniteMagnitude),
+                        options: [.usesLineFragmentOrigin, .usesFontLeading],
+                        attributes: [.font: NSFont.systemFont(ofSize: max(10, fontSize - 2))]
+                    ).height), 120)
                     sourceLabel.frame = NSRect(x: 10, y: ch, width: cw - 20, height: sh)
                     ch += sh + 4
                 }
