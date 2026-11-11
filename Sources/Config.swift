@@ -18,9 +18,6 @@ enum Config {
         set { d.set(newValue, forKey: "ollamaURL") }
     }
 
-    /// 翻译通道固定为 Ollama（OpenAI 兼容接口）；Web/MyMemory 通道因翻译质量缺陷已移除
-    static let channel = "ollama"
-
     /// 模型名（空 = 提示用户去设置填写）
     static var model: String {
         get { d.string(forKey: "model") ?? "" }
@@ -71,21 +68,21 @@ enum Config {
 
     // MARK: 偏好设置
     static var hideInput: Bool {
-        // 键名与主窗读取（MainWindow Pref "hideTranslateInput"）及 Lite（StoreService.ts:199）一致；
+        // 键名与 Lite（StoreService.ts:199）一致；
         // 旧键 translateInputHideStatus 无读取方，已废弃
         get { flag("hideTranslateInput", false) } set { setFlag("hideTranslateInput", newValue) }
     }
     static var hideLanguageBar: Bool {
         get { flag("hideTranslateLanguage", false) } set { setFlag("hideTranslateLanguage", newValue) }
     }
-    /// 显示位置：写入 MainWindow 读取的同一键 translateShowPositionType
+    /// 显示位置（单一读取路径：MainWindow.positionWindow）
     /// 下拉索引 0=LAST_TIME 1=FROM_TOP 2=FOLLOW_MOUSE
     static let positionTypes = ["LAST_TIME", "FROM_TOP", "FOLLOW_MOUSE"]
     static var showPosition: Int {
         get { positionTypes.firstIndex(of: d.string(forKey: "translateShowPositionType") ?? "LAST_TIME") ?? 0 }
         set { d.set(positionTypes[max(0, min(2, newValue))], forKey: "translateShowPositionType") }
     }
-    /// 距顶部百分比：MainWindow 读 fromTopOfWindowPercentage（1-200，默认 30）
+    /// 距顶部百分比（1-200，默认 30）
     static var topPercent: Int {
         get { let v = d.integer(forKey: "fromTopOfWindowPercentage"); return (1...200).contains(v) ? v : 30 }
         set { d.set(max(1, min(200, newValue)), forKey: "fromTopOfWindowPercentage") }

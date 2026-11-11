@@ -58,7 +58,6 @@ final class OllamaClient {
     static let shared = OllamaClient()
 
     private var currentTask: Task<Void, Never>?
-    var isBusy: Bool { currentTask != nil }
 
     // MARK: - 语言检测（逐条复刻 languageUtil.ts / LanguageEnum.ts）
     // languageUtil.ts:5-16 only = [eng, cmn, kor, rus, jpn]

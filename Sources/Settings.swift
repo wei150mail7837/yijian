@@ -73,13 +73,6 @@ final class SettingsWindow: NSWindow, NSWindowDelegate {
 
     private func page() -> NSView { NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 530)) }
 
-    private func note(_ s: String) -> NSView {
-        let v = page()
-        let l = NSTextField(wrappingLabelWithString: s)
-        l.frame = NSRect(x: 0, y: 440, width: 600, height: 60)
-        v.addSubview(l); return v
-    }
-
     private func label(_ v: NSView, _ text: String, _ y: CGFloat) {
         let l = NSTextField(labelWithString: text)
         l.frame = NSRect(x: 0, y: y, width: 150, height: 20); l.alignment = .right

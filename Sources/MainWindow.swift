@@ -49,7 +49,6 @@ private final class FlippedView: NSView { override var isFlipped: Bool { true } 
 final class MainWindow: NSWindow, NSWindowDelegate {
     static let shared = MainWindow()
 
-    private let fixedInitHeight: CGFloat = 339
     private let bg = NSVisualEffectView()
     private let root = FlippedView()
     // Header
@@ -216,7 +215,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         inputView.textContainer?.widthTracksTextView = true
         inputView.onEnter = { [weak self] in self?.enterPressed() }
         inputView.onPaste = { [weak self] in
-            guard let self, !Pref.flag("inputTranslationAutoStatus") else { return }
+            guard let self, !Config.inputTranslationAuto else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.startTranslate() }
         }
         NotificationCenter.default.addObserver(self, selector: #selector(inputChanged),
@@ -331,10 +330,10 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         return max(lineHeight * 2, ceil(lm.usedRect(for: tc).height) + 4)
     }
 
-    private var hideInput: Bool { Pref.flag("hideTranslateInput") }
-    private var hideLanguage: Bool { Pref.flag("hideTranslateLanguage") }
-    private var showCamel: Bool { Pref.flag("copyCamelCaseResultStatus") && hasLatin }
-    private var showSnake: Bool { Pref.flag("copySnakeCaseResultStatus") && hasLatin }
+    private var hideInput: Bool { Config.hideInput }
+    private var hideLanguage: Bool { Config.hideLanguageBar }
+    private var showCamel: Bool { Config.copyCamelCaseResult && hasLatin }
+    private var showSnake: Bool { Config.copySnakeCaseResult && hasLatin }
     private var hasLatin: Bool { !isError && lastFullResult.range(of: "[a-zA-Z]", options: .regularExpression) != nil }
 
     private func layoutContent() {
@@ -425,7 +424,6 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     }
 
     /// MainWindowResize.autoHeight：用户手动调过高度后不再自动调高；保持左上角不动
-    private var animTargetH: CGFloat = -1
     private func autoHeight(_ contentH: CGFloat) {
         guard !manualHeight, !inLiveResize else { return }
         let target = max(minSize.height, ceil(contentH))
@@ -439,7 +437,6 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         animateNextResize = false
         adjustingFrame = true
         if animate {
-            animTargetH = target
             NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.12
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -473,7 +470,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     }
 
     private func clearIfNeeded() {
-        guard !Pref.flag("showTranslateNotEmptyStatus") else { return }
+        guard !Config.showTranslateNotEmpty else { return }
         OllamaClient.shared.cancel()
         stopTypewriter()
         activeRequestId += 1
@@ -507,19 +504,17 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         }
     }
 
-    /// translateShowPositionType：LAST_TIME（默认）/ FOLLOW_MOUSE / FROM_TOP
+    /// 显示位置（单一读取路径：Config.showPosition）：0=LAST_TIME 1=FROM_TOP 2=FOLLOW_MOUSE
     private func positionWindow() {
-        let type = Pref.d.string(forKey: "translateShowPositionType") ?? "LAST_TIME"
         let mouse = NSEvent.mouseLocation
         let scr = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
         guard let scr else { return }
-        switch type {
-        case "FOLLOW_MOUSE":
+        switch Config.showPosition {
+        case 2: // FOLLOW_MOUSE
             // Electron (x, y+11) 是左上原点；Cocoa 左下原点 → 窗顶 = 鼠标y - 11
             setFrameTopLeftPoint(NSPoint(x: mouse.x, y: mouse.y - 11))
-        case "FROM_TOP":
-            var pct = Pref.d.double(forKey: "fromTopOfWindowPercentage")
-            if pct < 1 || pct > 200 { pct = 30 }
+        case 1: // FROM_TOP
+            let pct = Double(Config.topPercent)
             let sf = scr.frame
             // 对齐 Lite GlobalWin.ts:112-118：pct=50 时窗口垂直居中 → 分母含窗口自身高度
             let topOffset = (sf.height - frame.height) / 2 * (pct * 2 / 100)
@@ -539,14 +534,14 @@ final class MainWindow: NSWindow, NSWindowDelegate {
 
     private func enterPressed() {
         // 自动翻译模式下回车被吞掉
-        if Pref.flag("inputTranslationAutoStatus") { return }
+        if Config.inputTranslationAuto { return }
         startTranslate()
     }
 
     @objc private func inputChanged() {
         animateNextResize = true
         layoutContent()
-        guard Pref.flag("inputTranslationAutoStatus") else { return }
+        guard Config.inputTranslationAuto else { return }
         debounce?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -566,7 +561,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     func startTranslate() {
         var text = inputView.string
         guard !cleaned(text).isEmpty else { showToast("内容不能为空", kind: .warning); return }
-        if Pref.flag("wrapReplaceSpaceStatus") {
+        if Config.wrapReplaceSpace {
             text = text.replacingOccurrences(of: "[\\n\\r]", with: " ", options: .regularExpression)
         }
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -773,16 +768,6 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         SettingsWindow.shared.showSettings()
     }
 
-    /// 语种变更（LanguagePanel 回调）：源=自动/具体语种；目标若是 auto 则按检测方向落地
-    func languagesUpdated() {
-        if Pref.resultLanguage == "auto" {
-            Pref.resultLanguage = OllamaClient.autoTarget(for: Pref.inputLanguage == "auto"
-                ? "x" : Pref.inputLanguage)
-        }
-        srcButton.refreshTitle(current: Pref.inputLanguage)
-        dstButton.refreshTitle(current: Pref.resultLanguage)
-    }
-
     @objc private func swapLanguages() {
         let a = Pref.inputLanguage
         Pref.inputLanguage = Pref.resultLanguage == "auto" ? OllamaClient.autoTarget(for: "x") : Pref.resultLanguage
@@ -849,7 +834,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
 }
 
 /// Esc 隐藏窗口的事件监视器（主/OCR/设置窗口共用）
-/// 置顶例外：主窗置顶时 Esc 不隐藏，除非 alwaysOnTopAllowEscStatus=Y
+/// 置顶例外：主窗置顶时 Esc 不隐藏，除非设置开启"允许 Esc 隐藏"（Config.alwaysOnTopAllowEsc）
 enum EscMonitor {
     private static var monitor: Any?
     private static var targets = NSHashTable<NSWindow>.weakObjects()
@@ -862,7 +847,7 @@ enum EscMonitor {
             // 快捷键录制器正在录入：Esc 归它处理（取消录入），不隐藏窗口
             if keyWindow.firstResponder is ShortcutRecorder { return event }
             if keyWindow === MainWindow.shared, MainWindow.shared.isPinned,
-               UserDefaults.standard.string(forKey: "alwaysOnTopAllowEscStatus") != "Y" {
+               !Config.alwaysOnTopAllowEsc {
                 return event
             }
             keyWindow.orderOut(nil)
@@ -883,11 +868,11 @@ final class IconButton: NSButton {
         imagePosition = .imageOnly
         wantsLayer = true
         layer?.cornerRadius = 6
-        configure(symbol: symbol, tip: tip, action: action ?? Selector(("noop")))
+        configure(symbol: symbol, tip: tip, action: action)
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(symbol: String, tip: String, action: Selector) {
+    func configure(symbol: String, tip: String, action: Selector?) {
         image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
         toolTip = tip
         self.action = action

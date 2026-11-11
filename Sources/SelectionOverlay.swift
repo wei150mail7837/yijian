@@ -165,7 +165,6 @@ private final class OverlayWindow: NSWindow {
 private final class OverlayView: NSView {
     weak var owner: SelectionOverlay?
     private let frozen: CGImage
-    private var lastMagnifyAt = Date.distantPast
 
     init(owner: SelectionOverlay, frozen: CGImage) {
         self.owner = owner

@@ -8,7 +8,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static let reopenNote = Notification.Name("com.isa.ttimenative.reopen")
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        // Web 翻译通道桥接：赶在首个 URLSession 建立前注册（Config.ollamaURL getter 兜底）
         // 单实例：已有同 bundle 实例在跑 → 通知它 translateInput 后本实例退出
         let me = ProcessInfo.processInfo.processIdentifier
         let bid = Bundle.main.bundleIdentifier ?? "com.isa.ttimenative"

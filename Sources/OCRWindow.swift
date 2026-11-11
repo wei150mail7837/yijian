@@ -98,7 +98,7 @@ final class OCRWindow: NSWindow, NSWindowDelegate {
         scroll.documentView = textView
 
         for v in [leftPanel, rightPanel] { v.translatesAutoresizingMaskIntoConstraints = false; bg.addSubview(v) }
-        let leftBar = NSStackView(views: [boxCheck, copyImg]), rightBar = NSStackView(views: [copyTxt, translate, close])
+        let leftBar = NSStackView(views: [boxCheck, copyImg]), rightBar = NSStackView(views: [pin, copyTxt, translate, settings, close])
         for v: NSView in [imgView, leftBar, leftLoading] { v.translatesAutoresizingMaskIntoConstraints = false; leftPanel.addSubview(v) }
         for v: NSView in [scroll, rightBar, rightLoading] { v.translatesAutoresizingMaskIntoConstraints = false; rightPanel.addSubview(v) }
 
