@@ -87,7 +87,6 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     private var toastCards: [ToastCardView] = []
     private let copyInputButton = IconButton()
     // 打字机：记录上次参与布局的结果高度，未变化帧跳过全量重排
-    private var lastLaidResultH: CGFloat = -1
 
     private var pinned = false
     private var folded = false
@@ -274,6 +273,9 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         resultView.isRichText = false
         resultView.drawsBackground = false
         resultView.textContainerInset = NSSize(width: 2, height: 2)
+        resultView.isVerticallyResizable = true
+        resultView.isHorizontallyResizable = false
+        resultView.autoresizingMask = [.width]
         // 长译文滚动：内容超出结果区高度时可滚动（对齐 Lite .block-layer overflow:auto）
         resultScroll.hasVerticalScroller = true
         resultScroll.borderType = .noBorder
@@ -322,12 +324,6 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         let used = lm.usedRect(for: tc).height
         let lines = max(2, min(10, Int(ceil(used / lineHeight))))
         return CGFloat(lines) * lineHeight + 10
-    }
-
-    private var resultTextHeight: CGFloat {
-        guard let lm = resultView.layoutManager, let tc = resultView.textContainer else { return 20 }
-        lm.ensureLayout(for: tc)
-        return max(lineHeight * 2, ceil(lm.usedRect(for: tc).height) + 4)
     }
 
     private var hideInput: Bool { Config.hideInput }
@@ -402,15 +398,14 @@ final class MainWindow: NSWindow, NSWindowDelegate {
             }
             resultScroll.frame = NSRect(x: 6, y: ch, width: cw - 12, height: 10)
             resultView.textContainer?.containerSize = NSSize(width: cw - 16, height: .greatestFiniteMagnitude)
-            // 填充驱动：结果区 ≥ 内容高度，且填满窗口剩余空间（手动拉伸窗口时跟随）
+            // 视口填充驱动：结果区高度 = 窗口剩余空间（窗口高度由 autoHeight 封顶在屏内）；
+            // 译文超出视口时由 resultScroll 滚动，不再撑大窗口
             let availCard = root.bounds.height - y - margin
             let fillH = availCard - ch - 28   // 28 = 结果下方按钮行 + 卡片内边距
-            let rh = max(resultTextHeight, fillH)
-            resultScroll.frame.size.height = rh
-            resultView.minSize = NSSize(width: resultScroll.contentSize.width, height: rh)
+            resultScroll.frame.size.height = max(40, fillH)
+            resultView.minSize = NSSize(width: resultScroll.contentSize.width, height: 0)
             resultView.frame.size.width = resultScroll.contentSize.width
-            lastLaidResultH = rh // layoutContent 任何路径重排后同步基线，避免打字机误判
-            ch += rh + 4
+            ch += max(40, fillH) + 4
             if !lastFullResult.isEmpty && spinner.isHidden {
                 var x: CGFloat = 8
                 for (b, show) in [(copyButton, true), (camelButton, showCamel), (snakeButton, showSnake)] where show {
@@ -431,7 +426,9 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     /// MainWindowResize.autoHeight：用户手动调过高度后不再自动调高；保持左上角不动
     private func autoHeight(_ contentH: CGFloat) {
         guard !manualHeight, !inLiveResize else { return }
-        let target = max(minSize.height, ceil(contentH))
+        // 窗口高度封顶：不超过所在屏的可视范围（超出部分由结果区滚动条消化）
+        let screenMax = screen?.visibleFrame.height ?? ceil(contentH)
+        let target = max(minSize.height, min(ceil(contentH), floor(screenMax)))
         if adjustingFrame { return } // 动画进行中：过程帧不再重算
         guard abs(frame.height - target) > 0.5 else { return }
         var f = frame
@@ -659,13 +656,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         pendingChars.removeFirst(min(n, pendingChars.count))
         lastFullResult += s
         resultView.textStorage?.append(NSAttributedString(string: s, attributes: resultAttrs))
-        // 高度变化才全量重排（含窗口自适应）；纯滚动帧只跟随，避免 60Hz 重排抖动
-        let rh = resultTextHeight
-        if abs(rh - lastLaidResultH) > 0.5 {
-            lastLaidResultH = rh
-            animateNextResize = true   // 打字增行同样走平滑动画
-            layoutContent()
-        }
+        // 视口固定 + 滚动跟随：不再按内容高度撑大窗口
         resultView.scrollToEndOfDocument(nil)
     }
 
