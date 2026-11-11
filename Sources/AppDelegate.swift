@@ -5,12 +5,12 @@ import ServiceManagement
 /// 应用入口：单实例、托盘、快捷键、窗口编排
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
-    static let reopenNote = Notification.Name("com.isa.ttimenative.reopen")
+    static let reopenNote = Notification.Name("app.yijian.translate.reopen")
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // 单实例：已有同 bundle 实例在跑 → 通知它 translateInput 后本实例退出
         let me = ProcessInfo.processInfo.processIdentifier
-        let bid = Bundle.main.bundleIdentifier ?? "com.isa.ttimenative"
+        let bid = Bundle.main.bundleIdentifier ?? "app.yijian.translate"
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: bid)
             .filter { $0.processIdentifier != me }
         if !others.isEmpty {
@@ -59,11 +59,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
             button.image = makeTrayIcon()
-            button.toolTip = "TTime"
+            button.toolTip = "译见 YiJian"
         }
         let menu = NSMenu()
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
-        let v = NSMenuItem(title: "TTime 版本 " + version, action: nil, keyEquivalent: "")
+        let v = NSMenuItem(title: "译见 版本 " + version, action: nil, keyEquivalent: "")
         v.isEnabled = false
         menu.autoenablesItems = false
         menu.addItem(v)
@@ -75,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "查看日志", action: #selector(openLogs), keyEquivalent: "")
         menu.addItem(withTitle: "设置", action: #selector(openSettings), keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "重启TTime", action: #selector(relaunch), keyEquivalent: "")
+        menu.addItem(withTitle: "重启译见", action: #selector(relaunch), keyEquivalent: "")
         menu.addItem(withTitle: "退出", action: #selector(quitApp), keyEquivalent: "q")
         for menuItem in menu.items where menuItem.action != nil { menuItem.target = self }
         item.menu = menu

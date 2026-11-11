@@ -7,7 +7,7 @@ let logFile: URL = {
 }()
 
 let appSupportDir: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-    .appendingPathComponent("TTimeNative", isDirectory: true)
+    .appendingPathComponent("YiJian", isDirectory: true)
 
 /// 轻量日志：只记事件与长度，不落用户内容原文（隐私纪律）
 func log(_ items: Any...) {

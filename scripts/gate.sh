@@ -3,7 +3,7 @@
 # 用法：scripts/gate.sh [模型名] [接口地址]
 set -u
 cd "$(dirname "$0")/.."
-BIN="TTimeNative.app/Contents/MacOS/TTimeNative"
+BIN="YiJian.app/Contents/MacOS/YiJian"
 [[ -x "$BIN" ]] || { echo "GATE_FAIL: 缺 $BIN，先 ./build.sh"; exit 2; }
 TMP=$(mktemp -d); IMG="$TMP/gate.png"
 TLINES=("Hello World Line One" "第二行中文测试文本" "Third line 第三行混排" "最后一行 Final")
@@ -39,8 +39,8 @@ sys.exit(0 if got==exp else 1)
 P
 echo "GATE_OK: OCR"
 
-[[ -n "${1:-}" ]] && defaults write com.isa.ttimenative model -string "$1"
-[[ -n "${2:-}" ]] && defaults write com.isa.ttimenative ollamaURL -string "$2"
+[[ -n "${1:-}" ]] && defaults write app.yijian.translate model -string "$1"
+[[ -n "${2:-}" ]] && defaults write app.yijian.translate ollamaURL -string "$2"
 OUT=$("$BIN" --selftest-translate "Hello, world" 2>&1); RC=$?
 echo "$OUT"
 [[ $RC -eq 0 && "$OUT" == *TRANSLATE_RESULT:?* ]] || { echo "GATE_FAIL: 翻译失败或为空"; exit 6; }

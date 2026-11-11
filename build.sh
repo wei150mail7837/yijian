@@ -1,10 +1,10 @@
 #!/bin/zsh
-# TTime Native 构建脚本：swiftc 直编（无 Xcode 依赖，纯 AppKit）
+# 译见 YiJian 构建脚本：swiftc 直编（无 Xcode 依赖，纯 AppKit）
 set -e
 cd "$(dirname "$0")"
 VERSION="1.0.0"
 
-APP="TTimeNative.app"
+APP="YiJian.app"
 BIN="$APP/Contents/MacOS"
 RES="$APP/Contents/Resources"
 
@@ -13,7 +13,7 @@ mkdir -p "$BIN" "$RES"
 
 echo "[1/3] swiftc 编译..."
 swiftc -O \
-  -o "$BIN/TTimeNative" \
+  -o "$BIN/YiJian" \
   Sources/*.swift \
   -framework AppKit -framework Carbon -framework Vision -framework ServiceManagement
 
@@ -23,12 +23,12 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>TTimeNative</string>
-  <key>CFBundleDisplayName</key><string>TTimeNative</string>
-  <key>CFBundleIdentifier</key><string>com.isa.ttimenative</string>
+  <key>CFBundleName</key><string>译见</string>
+  <key>CFBundleDisplayName</key><string>译见</string>
+  <key>CFBundleIdentifier</key><string>app.yijian.translate</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
-  <key>CFBundleExecutable</key><string>TTimeNative</string>
+  <key>CFBundleExecutable</key><string>YiJian</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>

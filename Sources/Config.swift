@@ -1,9 +1,21 @@
 import Foundation
 
-/// 全局配置（UserDefaults 持久化，域 com.isa.ttimenative）
+/// 全局配置（UserDefaults 持久化，域 app.yijian.translate）
 /// 键名与 Electron Lite 版 config store 对齐；默认值见 StoreService.ts
 enum Config {
     private static let d = UserDefaults.standard
+    /// 旧测试域名一次性迁移（发布改名遗留；新装用户无感知）。
+    /// 静态存储属性惰性初始化：首次访问 Config 任意成员时自动执行。
+    private static let migrated: Bool = {
+        let old = UserDefaults(suiteName: "app.yijian.translate")
+        if let old, d.object(forKey: "ollamaURL") == nil, old.object(forKey: "ollamaURL") != nil {
+            for key in ["ollamaURL", "model", "inputLanguage", "resultLanguage"] {
+                if let v = old.object(forKey: key) { d.set(v, forKey: key) }
+            }
+        }
+        return true
+    }()
+    private static let _migrateTrigger: Bool = migrated
 
     /// 兼容 Bool 与 "Y"/"N" 字符串两种写法（defaults write 可写任一种）
     private static func flag(_ key: String, _ def: Bool) -> Bool {
