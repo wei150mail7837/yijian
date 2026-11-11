@@ -183,8 +183,8 @@ final class OCRWindow: NSWindow, NSWindowDelegate {
                 log("[OCR] 完成 行=\(r.lines.count) 长度=\(r.allText.count)")
             case .failure(let error):
                 self.textView.string = ""
-                log("[OCR] 失败")
-                MainWindow.shared.showErrorMessage("文字识别失败：\(error.localizedDescription)")
+                log("[OCR] 失败：\(error.localizedDescription)")
+                MainWindow.shared.showToast("文字识别失败：\(error.localizedDescription)", kind: .error)
             }
         }
     }

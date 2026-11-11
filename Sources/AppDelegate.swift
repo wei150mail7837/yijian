@@ -168,7 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     log("[截图翻译] 识别 长度=\(text.count)")
                     MainWindow.shared.showForInput(text.isEmpty ? nil : text)
                 case .failure(let error):
-                    log("[截图翻译] 失败")
+                    log("[截图翻译] 失败：\(error.localizedDescription)")
                     MainWindow.shared.showForInput(nil)
                     MainWindow.shared.showErrorMessage(error.localizedDescription)
                 }
