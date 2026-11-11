@@ -168,6 +168,11 @@ final class SelectionOverlay {
         guard let fs = frozenScreen(containing: center) else { done?(nil); return }
         let origin = fs.screen.frame.origin
         let local = rect.offsetBy(dx: -origin.x, dy: -origin.y)
+        // 坐标系说明（终审曾疑 Y 轴镜像，实为误判）：
+        // Cocoa 全局坐标 y 向下、主屏左上 = (0,0)，screen.frame.origin.y 即本屏【顶边】的全局 y。
+        // 故 local.y = 全局 y - 顶边 y = 「距屏顶距离」（左上原点向下），与 CGImage 像素坐标
+        // （同为左上原点、行 0 = 屏幕顶行）方向一致：像素 y = 距顶距离 × scale，无需翻转。
+        // 副屏 origin.y 为负值时公式同样成立（minY 恒为该屏顶边）。
         let px = CGRect(x: local.minX * fs.scale, y: local.minY * fs.scale,
                         width: local.width * fs.scale, height: local.height * fs.scale)
         guard let cropped = fs.image.cropping(to: px) else { done?(nil); return }
@@ -240,6 +245,7 @@ private final class OverlayView: NSView {
         guard let owner, let fs = owner.frozenScreen(containing: cursor) else { return }
         let origin = fs.screen.frame.origin
         let srcSide: CGFloat = 44                       // 采样 44pt 区域 → 110pt 视图 ≈ 2.5x
+        // local.y 为距屏顶距离（Cocoa y 向下），与 CGImage 左上原点行方向一致，无需翻转
         let local = NSPoint(x: cursor.x - origin.x, y: cursor.y - origin.y)
         let px = CGRect(x: (local.x - srcSide / 2) * fs.scale, y: (local.y - srcSide / 2) * fs.scale,
                         width: srcSide * fs.scale, height: srcSide * fs.scale)
