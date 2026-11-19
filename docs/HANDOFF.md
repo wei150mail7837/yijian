@@ -1,4 +1,4 @@
-# TTime 产品线全量 Handoff（译见 YiJian + TTime Lite）
+# TTime 产品线 Handoff（译见 YiJian 主力 + TTime Lite 归档）
 
 > 更新：2026-11-19 09:20。覆盖**除图标应用任务外**的全部现状。新会话接手以本文为唯一入口。
 > 范围说明：图标已定稿（`assets/icon_yijian.swift`）但**应用该图标这一步被用户明确搁置**，本文不含其执行细节，仅标注状态。
@@ -23,7 +23,7 @@
 
 ### 基本信息
 - 装机：`/Applications/YiJian.app`（1.5M），配置域 `app.yijian.translate`，数据目录 `~/Library/Application Support/YiJian/`（日志在 `logs/`）
-- 仓库：源码 + handoff + 图标定稿源码均已推送远端（HEAD 3cedccb）
+- 仓库：源码 + handoff + 图标定稿源码均已推送远端
 - 引擎：mac Vision 进程内 OCR（无外置 helper）；翻译 = OllamaClient 真逐字 SSE 流式
 - 隐私：零遥测；日志只记事件与长度，**不落翻译原文**（隐私审计后立规）
 
@@ -69,7 +69,7 @@ tail ~/Library/"Application Support"/YiJian/logs/$(date +%Y-%m-%d).log   # 零 e
 
 ## 3. TTime Lite（Electron 归档版）现状
 
-- 仓库 `~/Zcode/TTime-community`，**lite 分支**，远端私仓已同步（HEAD efbc29c + 后续 README/docs 提交）
+- 仓库 `~/Zcode/TTime-community`，**lite 分支**，远端私仓已同步
 - Release [v1.0.1](https://github.com/wei150mail7837/ttime-lite/releases/tag/v1.0.1)：**双平台三资产**（win setup 107M + mac DMG 108M + mac zip 105M），公开可下载
 - 本地源码目录已瘦身为 84M（删 node_modules/dist/out/模型缓存；`npm install` + `prepare:ocr` 可恢复构建能力）
 - **Windows 构建链已由用户在真 Win 机器验证**（产物即 `TTime Lite-1.0.1-setup.exe`，NSIS 结构完整性已审计）；构建手册 `BUILD-Windows.md`
